@@ -1,0 +1,12 @@
+/target
+*.db
+*.db-shm
+.db-wal
+.env.
+.env
+*.swp
+*.swo
+*~
+.direnv/
+.vscode/
+.idea
