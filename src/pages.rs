@@ -1,6 +1,8 @@
 use crate::AppState;
 use crate::cookies::LoggedInUser;
+use crate::error::AppError;
 use crate::layout::layout;
+use crate::models::portfolio::list_portfolios;
 use axum::extract::State;
 use axum::response::IntoResponse;
 
@@ -18,6 +20,31 @@ pub async fn hello(
                     },
         user.as_ref(),
     )
+}
+
+pub async fn portfolios(
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<maud::Markup, AppError> {
+    let portfolios = list_portfolios(state.db()).await?;
+    Ok(layout(
+        "Portfolios",
+        maud::html! {
+            div class="portfolio-list"{
+                @for (id, name) in portfolios {
+                    div class="portfolio-row" id=(format!("portfolio-{}", id)){
+                        div class="portfolio-info" {
+                            h3 { (name) }
+                        }
+                            div class="portfolio-actions"{
+                            a href=(format!("/portfolio/{}", id)) class="btn-view" {"View Details" }
+                        }
+                    }
+                }
+            }
+        },
+        Some(&user),
+    ))
 }
 
 pub async fn dashboard(user: LoggedInUser) -> impl IntoResponse {

@@ -17,3 +17,4 @@ axum-extra = { version = "0.10", features = ["cookie", "cookie-signed", "cookie-
 time = "0.3.49"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = {version = "1.23.3", features = ["v7", "serde"]}
