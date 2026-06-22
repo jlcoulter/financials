@@ -30,6 +30,7 @@ pub async fn login(State(_state): State<AppState>) -> impl IntoResponse {
             div id="error-box" {}
         },
         None,
+        false,
     )
 }
 
@@ -69,6 +70,7 @@ pub async fn signup(State(_state): State<AppState>) -> impl IntoResponse {
             div id="error-box" {}
         },
         None,
+        false,
     )
 }
 

@@ -6,7 +6,7 @@ CREATE TABLE portfolios (
 
 CREATE TABLE wealth_items (
 	item_id UUID PRIMARY KEY,
-	portfolio_id INT NOT NULL REFERENCES portfolios(portfolio_id) ON DELETE CASCADE,
+	portfolio_id TEXT NOT NULL REFERENCES portfolios(portfolio_id) ON DELETE CASCADE,
 	name VARCHAR(255) NOT NULL,
 	item_type VARCHAR(50) NOT NULL,
 	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

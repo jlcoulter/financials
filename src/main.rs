@@ -4,6 +4,8 @@ mod error;
 mod layout;
 mod models;
 mod pages;
+mod pages_features;
+mod seed;
 use std::str::FromStr;
 
 use axum::Router;
@@ -24,6 +26,7 @@ async fn main() -> anyhow::Result<()> {
     let options = SqliteConnectOptions::from_str(connection_string)?.create_if_missing(true);
     let db = SqlitePool::connect_with(options).await?;
     sqlx::migrate!().run(&db).await?;
+    seed::seed_if_empty(&db).await?;
 
     let key = Key::generate();
     let state = crate::AppState { db, key };
@@ -59,6 +62,34 @@ fn app(state: AppState) -> Router {
         .route("/dashboard", axum::routing::get(pages::dashboard))
         .route("/logout", axum::routing::post(auth::logout_post))
         .route("/portfolios", axum::routing::get(pages::portfolios))
+        .route("/portfolios", axum::routing::post(pages::create_portfolio))
+        .route("/portfolio/{id}", axum::routing::get(pages::portfolio))
+        .route("/portfolio/{id}/items", axum::routing::post(pages::add_item))
+        .route("/portfolio/{id}/items/delete", axum::routing::post(pages::delete_item))
+        .route("/portfolio/{id}/balances", axum::routing::post(pages::add_balance))
+        .route("/portfolio/{id}/balances/delete", axum::routing::post(pages::delete_balance_row))
+        .route("/portfolio/{id}/cell", axum::routing::get(pages::edit_cell))
+        .route("/portfolio/{id}/cell", axum::routing::put(pages::save_cell))
+        .route("/portfolio/{id}/delete", axum::routing::post(pages::delete_portfolio))
+        .route("/stats", axum::routing::get(pages::stats))
+        // Feature pages
+        .route("/transactions", axum::routing::get(pages_features::transactions))
+        .route("/transactions/new", axum::routing::get(pages_features::transactions_new))
+        .route("/transactions/new", axum::routing::post(pages_features::transactions_create))
+        .route("/transactions/{id}", axum::routing::post(pages_features::transactions_delete))
+        .route("/budgets", axum::routing::get(pages_features::budgets))
+        .route("/budgets/new", axum::routing::get(pages_features::budgets_new))
+        .route("/budgets/new", axum::routing::post(pages_features::budgets_create))
+        .route("/goals", axum::routing::get(pages_features::goals))
+        .route("/goals/new", axum::routing::get(pages_features::goals_new))
+        .route("/goals/new", axum::routing::post(pages_features::goals_create))
+        .route("/goals/{id}/update", axum::routing::post(pages_features::goals_update_amount))
+        .route("/goals/{id}/delete", axum::routing::post(pages_features::goals_delete))
+        .route("/holidays", axum::routing::get(pages_features::holidays))
+        .route("/holidays/new", axum::routing::get(pages_features::holidays_new))
+        .route("/holidays/new", axum::routing::post(pages_features::holidays_create))
+        .route("/holidays/{id}/delete", axum::routing::post(pages_features::holidays_delete))
+        .route("/reconciliation", axum::routing::get(pages_features::reconciliation))
         .nest_service("/static", ServeDir::new("src/static"))
         .fallback(pages::not_found)
         .with_state(state)

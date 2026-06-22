@@ -1,31 +1,46 @@
 use crate::cookies::LoggedInUser;
 
-pub fn layout(title: &str, content: maud::Markup, username: Option<&LoggedInUser>) -> maud::Markup {
+pub fn layout(title: &str, content: maud::Markup, username: Option<&LoggedInUser>, wide: bool) -> maud::Markup {
+    let body_class = if wide { "wide" } else { "" };
     maud::html! {
         html {
             head {
                 title { (title) }
+                meta name="viewport" content="width=device-width, initial-scale=1" {}
                 script src="/static/htmx.min.js" {}
                 script {
                     (maud::PreEscaped("document.addEventListener('htmx:beforeSwap', function(e) { if(e.detail.xhr.status >= 400) e.detail.shouldSwap = true; });"))
                 }
                 link rel="stylesheet" href="/static/style.css"{}
             }
-            body {
-                header {
-                    @if let Some(name) = username {
-                        span { "Hello " (name.0) }
-                        form action = "/logout"
-                        method = "post" {
-                            button type = "submit" class="btn btn-ghost" {"Logout"}
+            body class=(body_class) {
+                nav {
+                    a href="/" class="nav-brand" { "Financials" }
+                    div class="nav-links" {
+                        a href="/dashboard" { "Dashboard" }
+                        a href="/portfolios" { "Portfolios" }
+                        a href="/stats" { "Stats" }
+                        a href="/transactions" { "Transactions" }
+                        a href="/budgets" { "Budgets" }
+                        a href="/goals" { "Goals" }
+                        a href="/holidays" { "Holidays" }
+                        a href="/reconciliation" { "Recon" }
+                    }
+                    div class="nav-user" {
+                        @if let Some(name) = username {
+                            span class="nav-username" { (name.0) }
+                            form action="/logout" method="post" style="display:inline" {
+                                button type="submit" class="btn btn-ghost btn-sm" { "Logout" }
+                            }
+                        } @else {
+                            a href="/login" class="btn btn-sm" { "Login" }
+                            a href="/signup" class="btn btn-sm" { "Sign up" }
                         }
-                    } @else {
-                        a href = "/login" class="btn" { "Login" }
-                        " "
-                        a href = "/signup" class="btn" {"Sign up"}
                     }
                 }
-                (content)
+                main class=(if wide { "main-wide" } else { "" }) {
+                    (content)
+                }
             }
         }
     }

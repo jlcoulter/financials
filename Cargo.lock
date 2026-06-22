@@ -1346,6 +1346,7 @@ dependencies = [
  "chrono",
  "maud",
  "serde",
+ "serde_json",
  "sqlx",
  "time",
  "tokio",
