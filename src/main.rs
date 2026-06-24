@@ -1,17 +1,7 @@
-mod auth;
-mod cookies;
-mod error;
-mod layout;
-mod models;
-mod pages;
-mod pages_features;
-mod seed;
-use std::str::FromStr;
-
-use axum::Router;
+use rust_web::{AppState, app};
 use axum_extra::extract::cookie::Key;
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
-use tower_http::services::ServeDir;
+use std::str::FromStr;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -26,10 +16,10 @@ async fn main() -> anyhow::Result<()> {
     let options = SqliteConnectOptions::from_str(connection_string)?.create_if_missing(true);
     let db = SqlitePool::connect_with(options).await?;
     sqlx::migrate!().run(&db).await?;
-    seed::seed_if_empty(&db).await?;
+    rust_web::seed::seed_if_empty(&db).await?;
 
     let key = Key::generate();
-    let state = crate::AppState { db, key };
+    let state = AppState { db, key };
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     tracing::info!("listening on {}", listener.local_addr().unwrap());
@@ -37,60 +27,4 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app(state)).await?;
 
     Ok(())
-}
-
-#[derive(Clone)]
-pub struct AppState {
-    db: SqlitePool,
-    pub key: Key,
-}
-
-impl AppState {
-    pub fn db(&self) -> &SqlitePool {
-        &self.db
-    }
-}
-
-fn app(state: AppState) -> Router {
-    Router::new()
-        .route("/", axum::routing::get(pages::hello))
-        .route("/time", axum::routing::get(pages::time))
-        .route("/signup", axum::routing::get(auth::signup))
-        .route("/signup", axum::routing::post(auth::signup_post))
-        .route("/login", axum::routing::get(auth::login))
-        .route("/login", axum::routing::post(auth::login_post))
-        .route("/dashboard", axum::routing::get(pages::dashboard))
-        .route("/logout", axum::routing::post(auth::logout_post))
-        .route("/portfolios", axum::routing::get(pages::portfolios))
-        .route("/portfolios", axum::routing::post(pages::create_portfolio))
-        .route("/portfolio/{id}", axum::routing::get(pages::portfolio))
-        .route("/portfolio/{id}/items", axum::routing::post(pages::add_item))
-        .route("/portfolio/{id}/items/delete", axum::routing::post(pages::delete_item))
-        .route("/portfolio/{id}/balances", axum::routing::post(pages::add_balance))
-        .route("/portfolio/{id}/balances/delete", axum::routing::post(pages::delete_balance_row))
-        .route("/portfolio/{id}/cell", axum::routing::get(pages::edit_cell))
-        .route("/portfolio/{id}/cell", axum::routing::put(pages::save_cell))
-        .route("/portfolio/{id}/delete", axum::routing::post(pages::delete_portfolio))
-        .route("/stats", axum::routing::get(pages::stats))
-        // Feature pages
-        .route("/transactions", axum::routing::get(pages_features::transactions))
-        .route("/transactions/new", axum::routing::get(pages_features::transactions_new))
-        .route("/transactions/new", axum::routing::post(pages_features::transactions_create))
-        .route("/transactions/{id}", axum::routing::post(pages_features::transactions_delete))
-        .route("/budgets", axum::routing::get(pages_features::budgets))
-        .route("/budgets/new", axum::routing::get(pages_features::budgets_new))
-        .route("/budgets/new", axum::routing::post(pages_features::budgets_create))
-        .route("/goals", axum::routing::get(pages_features::goals))
-        .route("/goals/new", axum::routing::get(pages_features::goals_new))
-        .route("/goals/new", axum::routing::post(pages_features::goals_create))
-        .route("/goals/{id}/update", axum::routing::post(pages_features::goals_update_amount))
-        .route("/goals/{id}/delete", axum::routing::post(pages_features::goals_delete))
-        .route("/holidays", axum::routing::get(pages_features::holidays))
-        .route("/holidays/new", axum::routing::get(pages_features::holidays_new))
-        .route("/holidays/new", axum::routing::post(pages_features::holidays_create))
-        .route("/holidays/{id}/delete", axum::routing::post(pages_features::holidays_delete))
-        .route("/reconciliation", axum::routing::get(pages_features::reconciliation))
-        .nest_service("/static", ServeDir::new("src/static"))
-        .fallback(pages::not_found)
-        .with_state(state)
 }

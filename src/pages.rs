@@ -1,8 +1,10 @@
 use crate::AppState;
 use crate::cookies::LoggedInUser;
 use crate::error::AppError;
-use crate::layout::layout;
+use crate::layout::{layout, active};
+use crate::models::features;
 use crate::models::portfolio::{self, BalanceLog, WealthItem};
+use crate::utils;
 use axum::extract::{Path, State};
 use axum::response::IntoResponse;
 use chrono::NaiveDate;
@@ -11,19 +13,11 @@ use std::collections::BTreeMap;
 // ── Helpers ──
 
 fn format_cents(cents: i64) -> String {
-    let sign = if cents < 0 { "-" } else { "" };
-    let abs = cents.abs();
-    let dollars = abs / 100;
-    let remainder = abs % 100;
-    format!("{}${}.{:02}", sign, dollars, remainder)
+    utils::format_cents(cents)
 }
 
 fn format_dollars(cents: i64) -> String {
-    let sign = if cents < 0 { "-" } else { "" };
-    let abs = cents.abs();
-    let dollars = abs / 100;
-    let remainder = abs % 100;
-    format!("{}{}.{:02}", sign, dollars, remainder)
+    utils::format_dollars(cents)
 }
 
 /// Pivot flat balance_logs into grid rows keyed by date.
@@ -88,32 +82,42 @@ pub async fn portfolios(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let portfolios = portfolio::list_portfolios(state.db()).await?;
-    Ok(layout(
+    let portfolios_list = portfolio::list_portfolios(state.db(), &user.0).await?;
+    // Batch fetch for net worth per portfolio
+    let all_items = portfolio::list_all_wealth_items_for_user(state.db(), &user.0).await?;
+    let all_logs = portfolio::list_all_balance_logs_for_user(state.db(), &user.0).await?;
+
+    let mut latest_per_item: std::collections::HashMap<uuid::Uuid, (chrono::NaiveDate, i64)> = std::collections::HashMap::new();
+    for l in &all_logs {
+        let entry = latest_per_item.entry(l.item_id).or_insert((l.log_date, l.balance_value));
+        if l.log_date > entry.0 { *entry = (l.log_date, l.balance_value); }
+    }
+
+    Ok(active(
         "Portfolios",
         maud::html! {
             div class="page-header" {
                 h2 { "Portfolios" }
-                details class="add-section" {
-                    summary { "+ New Portfolio" }
-                    form method="post" action="/portfolios" class="form-inline" {
-                        label { "Name"
-                            input type="text" name="name" placeholder="e.g. Retirement" required {}
-                        }
-                        button type="submit" class="btn btn-primary" { "Create" }
-                    }
-                }
+                a href="/portfolios/new" class="btn btn-primary" { "+ New Portfolio" }
             }
-            @if portfolios.is_empty() {
+            @if portfolios_list.is_empty() {
                 div class="empty-state" {
-                    p { "No portfolios yet. Create one above to get started." }
+                    p { "No portfolios yet. Create one to get started." }
+                    a href="/portfolios/new" class="btn btn-primary" { "Create Your First Portfolio" }
                 }
             } @else {
                 div class="portfolio-list" {
-                    @for (id, name) in portfolios {
+                    @for (id, name) in &portfolios_list {
+                        @let items_in: Vec<_> = all_items.iter().filter(|i| i.portfolio_id == *id).collect();
+                        @let net: i64 = items_in.iter().map(|item| {
+                            let val = latest_per_item.get(&item.item_id).map(|(_, v)| *v).unwrap_or(0);
+                            if item.item_type == "debt" { -val } else { val }
+                        }).sum();
+                        @let net_cls = if net >= 0 { "positive" } else { "negative" };
                         div class="portfolio-row" {
                             a href=(format!("/portfolio/{}", id)) class="portfolio-info" {
                                 h3 { (name) }
+                                span class=(format!("portfolio-meta {}", net_cls)) { (format_cents(net)) " · " (items_in.len()) " items" }
                             }
                             form method="post" action=(format!("/portfolio/{}/delete", id))
                                   class="inline-form"
@@ -127,6 +131,37 @@ pub async fn portfolios(
         },
         Some(&user),
         false,
+        "portfolios",
+    ))
+}
+
+// ── New Portfolio page ──
+
+pub async fn new_portfolio_form(
+    user: LoggedInUser,
+) -> Result<maud::Markup, AppError> {
+    Ok(active(
+        "New Portfolio",
+        maud::html! {
+            div class="page-header" {
+                a href="/portfolios" class="back-link" { "← Portfolios" }
+                h2 { "Create Portfolio" }
+            }
+            div class="content-card" {
+                form method="post" action="/portfolios" class="form-grid" {
+                    label { "Portfolio Name"
+                        input type="text" name="name" placeholder="e.g. Retirement, Family Finances" required {}
+                    }
+                    div class="form-actions" {
+                        button type="submit" class="btn btn-primary" { "Create Portfolio" }
+                        a href="/portfolios" class="btn" { "Cancel" }
+                    }
+                }
+            }
+        },
+        Some(&user),
+        false,
+        "portfolios",
     ))
 }
 
@@ -139,13 +174,13 @@ pub struct CreatePortfolioForm {
 
 pub async fn create_portfolio(
     State(state): State<AppState>,
-    _user: LoggedInUser,
+    user: LoggedInUser,
     axum::Form(form): axum::Form<CreatePortfolioForm>,
 ) -> Result<axum::response::Redirect, AppError> {
     if form.name.trim().is_empty() {
         return Err(AppError::BadRequest("Portfolio name is required".into()));
     }
-    portfolio::create_portfolio(state.db(), form.name.trim()).await?;
+    portfolio::create_portfolio(state.db(), form.name.trim(), &user.0).await?;
     Ok(axum::response::Redirect::to("/portfolios"))
 }
 
@@ -154,7 +189,7 @@ pub async fn portfolio(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id).await?;
+    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, &user.0).await?;
     let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
     let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
     let grid_rows = pivot_logs(&items, &logs);
@@ -185,7 +220,7 @@ pub async fn portfolio(
         (item.name.clone(), item.item_type.clone(), current)
     }).collect();
 
-    Ok(layout(
+    Ok(active(
         &format!("Portfolio - {}", name),
         maud::html! {
             div class="page-header" {
@@ -330,6 +365,7 @@ pub async fn portfolio(
         },
         Some(&user),
         true,
+        "portfolios",
     ))
 }
 
@@ -345,9 +381,11 @@ pub struct CellQuery {
 pub async fn edit_cell(
     Path(portfolio_id): Path<uuid::Uuid>,
     State(state): State<AppState>,
-    _user: LoggedInUser,
+    user: LoggedInUser,
     axum::extract::Query(query): axum::extract::Query<CellQuery>,
 ) -> Result<maud::Markup, AppError> {
+    // Verify portfolio ownership
+    portfolio::get_portfolio(state.db(), portfolio_id, &user.0).await?;
     let item_id = uuid::Uuid::parse_str(&query.item_id)
         .map_err(|e| AppError::BadRequest(format!("Invalid item_id: {}", e)))?;
     let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d")
@@ -387,9 +425,11 @@ pub async fn edit_cell(
 pub async fn save_cell(
     Path(portfolio_id): Path<uuid::Uuid>,
     State(state): State<AppState>,
-    _user: LoggedInUser,
+    user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<maud::Markup, AppError> {
+    // Verify portfolio ownership
+    portfolio::get_portfolio(state.db(), portfolio_id, &user.0).await?;
     let item_id_str = form.get("item_id")
         .ok_or_else(|| AppError::BadRequest("Missing item_id".into()))?;
     let item_id = uuid::Uuid::parse_str(item_id_str)
@@ -447,9 +487,11 @@ pub struct AddItemForm {
 pub async fn add_item(
     Path(portfolio_id): Path<uuid::Uuid>,
     State(state): State<AppState>,
-    _user: LoggedInUser,
+    user: LoggedInUser,
     axum::Form(form): axum::Form<AddItemForm>,
 ) -> Result<axum::response::Redirect, AppError> {
+    // Verify portfolio ownership
+    portfolio::get_portfolio(state.db(), portfolio_id, &user.0).await?;
     portfolio::create_wealth_item(state.db(), portfolio_id, &form.name, &form.item_type).await?;
     Ok(axum::response::Redirect::to(&format!("/portfolio/{}", portfolio_id)))
 }
@@ -460,9 +502,11 @@ pub async fn add_item(
 pub async fn add_balance(
     Path(portfolio_id): Path<uuid::Uuid>,
     State(state): State<AppState>,
-    _user: LoggedInUser,
+    user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<axum::response::Redirect, AppError> {
+    // Verify portfolio ownership
+    portfolio::get_portfolio(state.db(), portfolio_id, &user.0).await?;
     let log_date_str = form
         .get("log_date")
         .ok_or_else(|| AppError::BadRequest("Missing log_date".into()))?;
@@ -474,8 +518,7 @@ pub async fn add_balance(
     for item in &items {
         let key = format!("balance_{}", item.item_id);
         if let Some(value) = form.get(&key) {
-            if let Ok(dollars) = value.parse::<f64>() {
-                let cents = (dollars * 100.0).round() as i64;
+            if let Ok(cents) = utils::parse_dollars(value) {
                 portfolio::insert_balance_log(state.db(), item.item_id, log_date, cents).await?;
             }
             // Empty or non-numeric = skip that cell
@@ -490,9 +533,9 @@ pub async fn add_balance(
 pub async fn delete_portfolio(
     Path(portfolio_id): Path<uuid::Uuid>,
     State(state): State<AppState>,
-    _user: LoggedInUser,
+    user: LoggedInUser,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::delete_portfolio(state.db(), portfolio_id).await?;
+    portfolio::delete_portfolio(state.db(), portfolio_id, &user.0).await?;
     Ok(axum::response::Redirect::to("/portfolios"))
 }
 
@@ -501,9 +544,11 @@ pub async fn delete_portfolio(
 pub async fn delete_item(
     Path(portfolio_id): Path<uuid::Uuid>,
     State(state): State<AppState>,
-    _user: LoggedInUser,
+    user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<axum::response::Redirect, AppError> {
+    // Verify portfolio ownership
+    portfolio::get_portfolio(state.db(), portfolio_id, &user.0).await?;
     let item_id_str = form.get("item_id")
         .ok_or_else(|| AppError::BadRequest("Missing item_id".into()))?;
     let item_id = uuid::Uuid::parse_str(item_id_str)
@@ -522,9 +567,11 @@ pub struct DeleteRowForm {
 pub async fn delete_balance_row(
     Path(portfolio_id): Path<uuid::Uuid>,
     State(state): State<AppState>,
-    _user: LoggedInUser,
+    user: LoggedInUser,
     axum::Form(form): axum::Form<DeleteRowForm>,
 ) -> Result<axum::response::Redirect, AppError> {
+    // Verify portfolio ownership
+    portfolio::get_portfolio(state.db(), portfolio_id, &user.0).await?;
     let log_date = NaiveDate::parse_from_str(&form.log_date, "%Y-%m-%d")
         .map_err(|e| AppError::BadRequest(format!("Invalid date: {}", e)))?;
     portfolio::delete_balance_row(state.db(), portfolio_id, log_date).await?;
@@ -545,7 +592,7 @@ pub async fn stats(
     user: LoggedInUser,
     axum::extract::Query(filter): axum::extract::Query<StatsFilter>,
 ) -> Result<maud::Markup, AppError> {
-    let portfolios = portfolio::list_portfolios(state.db()).await?;
+    let portfolios = portfolio::list_portfolios(state.db(), &user.0).await?;
 
     // Parse filter params
     let filter_portfolio: Option<uuid::Uuid> = filter.portfolio
@@ -558,7 +605,10 @@ pub async fn stats(
         .as_deref()
         .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
-    // Collect data across portfolios (filtered)
+    // Collect data across portfolios (filtered) — batch fetch to avoid N+1 queries
+    let all_items_batch = portfolio::list_all_wealth_items_for_user(state.db(), &user.0).await?;
+    let all_logs_batch = portfolio::list_all_balance_logs_for_user(state.db(), &user.0).await?;
+
     let mut all_dates_set: std::collections::BTreeSet<NaiveDate> = std::collections::BTreeSet::new();
     // item_id -> (item_name, item_type, portfolio_name, date -> value)
     let mut all_item_logs: std::collections::HashMap<uuid::Uuid, (String, String, String, BTreeMap<NaiveDate, i64>)> = std::collections::HashMap::new();
@@ -571,8 +621,8 @@ pub async fn stats(
         if let Some(fp) = filter_portfolio {
             if *pid != fp { continue; }
         }
-        let items = portfolio::list_wealth_items(state.db(), *pid).await?;
-        let logs = portfolio::list_balance_logs(state.db(), *pid).await?;
+        let items: Vec<_> = all_items_batch.iter().filter(|i| i.portfolio_id == *pid).collect();
+        let logs: Vec<_> = all_logs_batch.iter().filter(|l| items.iter().any(|i| i.item_id == l.item_id)).collect();
 
         for item in &items {
             let mut series: BTreeMap<NaiveDate, i64> = BTreeMap::new();
@@ -713,6 +763,14 @@ pub async fn stats(
     let total_debts: i64 = portfolio_summaries.iter().map(|(_, _, _, _, _, d, _)| d).sum();
     let total_items: usize = portfolio_summaries.iter().map(|(_, _, _, _, _, _, c)| c).sum();
 
+    // ── Transaction category breakdown ──
+    let txn_categories = features::sum_transactions_by_category(
+        state.db(), &user.0, filter_from, filter_to, None, None, None,
+    ).await.unwrap_or_default();
+    let txn_cat_labels: Vec<String> = txn_categories.iter().map(|(cat, _, _)| cat.clone()).collect();
+    let txn_cat_income: Vec<i64> = txn_categories.iter().map(|(_, inc, _)| *inc).collect();
+    let txn_cat_expenses: Vec<i64> = txn_categories.iter().map(|(_, _, exp)| *exp).collect();
+
     // ── Change from first to last ──
     let first_net = net_worth_series.first().copied().unwrap_or(0);
     let last_net = net_worth_series.last().copied().unwrap_or(0);
@@ -720,16 +778,8 @@ pub async fn stats(
     let pct_change = if first_net != 0 { ((net_change as f64) / (first_net as f64).abs() * 100.0 * 10.0).round() / 10.0 } else { 0.0 };
 
     // ── Build filter query string for form ──
-    let filter_qs = format!("{}{}",
-        filter_portfolio.map(|u| format!("&portfolio={}", u)).unwrap_or_default(),
-        filter_from.map(|d| format!("&from={}", d.format("%Y-%m-%d"))).unwrap_or_default(),
-    );
-    let _filter_qs_with_to = format!("{}{}",
-        filter_qs,
-        filter_to.map(|d| format!("&to={}", d.format("%Y-%m-%d"))).unwrap_or_default(),
-    );
 
-    Ok(layout(
+    Ok(active(
         "Stats",
         maud::html! {
             div class="page-header" {
@@ -889,11 +939,29 @@ pub async fn stats(
                 }
             }
 
+            // ── Transaction category breakdown ──
+            @if !txn_categories.is_empty() {
+                div class="charts-grid" {
+                    div class="chart-card" {
+                        h3 { "Spending by Category" }
+                        div class="chart-container" {
+                            canvas id="txnCatChart" {}
+                        }
+                    }
+                    div class="chart-card" {
+                        h3 { "Income vs Expenses by Category" }
+                        div class="chart-container" {
+                            canvas id="txnBarChart" {}
+                        }
+                    }
+                }
+            }
+
             // ── Chart.js ──
-            script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" {}
+            script src="/static/chart.min.js" defer {}
             script {
                 (maud::PreEscaped(format!(
-                    "const chartLabels={labels};const netWorthData={nw};const assetsData={assets};const investmentsData={inv};const debtsData={debts};const momLabels={ml};const momData={md};const typeLabels={tl};const typeValues={tv};const itemSeries={is};",
+                    "const chartLabels={labels};const netWorthData={nw};const assetsData={assets};const investmentsData={inv};const debtsData={debts};const momLabels={ml};const momData={md};const typeLabels={tl};const typeValues={tv};const itemSeries={is};const txnCatLabels={tcl};const txnCatIncome={tci};const txnCatExpenses={tce};",
                     labels=serde_json::to_string(&chart_labels).unwrap(),
                     nw=serde_json::to_string(&net_worth_series).unwrap(),
                     assets=serde_json::to_string(&assets_series).unwrap(),
@@ -904,6 +972,9 @@ pub async fn stats(
                     tl=serde_json::to_string(&type_labels).unwrap(),
                     tv=serde_json::to_string(&type_values).unwrap(),
                     is=serde_json::to_string(&item_series.iter().map(|(n,t,pts)|(n.clone(),t.clone(),pts.clone())).collect::<Vec<_>>()).unwrap(),
+                    tcl=serde_json::to_string(&txn_cat_labels).unwrap(),
+                    tci=serde_json::to_string(&txn_cat_income).unwrap(),
+                    tce=serde_json::to_string(&txn_cat_expenses).unwrap(),
                 )))
                 (maud::PreEscaped(r#"
 const dollarFmt={callbacks:{label:function(ctx){return '$'+(ctx.parsed.y/100).toFixed(2);}}};
@@ -948,26 +1019,48 @@ if(itemSeries.length>0){
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#e2e8f0',padding:8,font:{size:10}}},tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+': $'+(ctx.parsed.y/100).toFixed(2);}}}},scales:{y:{ticks:{callback:function(v){return '$'+(v/100).toFixed(0);}},grid:{color:'#334155'}},x:{grid:{color:'#334155'},ticks:{maxRotation:45,font:{size:10}}}}}
   });
 }
+
+// Transaction category charts
+if(txnCatLabels.length>0){
+  const catColors=['#3b82f6','#10b981','#f87171','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
+  // Doughnut: total spending by category
+  new Chart(document.getElementById('txnCatChart').getContext('2d'),{
+    type:'doughnut',data:{labels:txnCatLabels,datasets:[{data:txnCatExpenses.map(Math.abs),backgroundColor:catColors.slice(0,txnCatLabels.length),borderColor:'#1e293b',borderWidth:2}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#e2e8f0',padding:10}},tooltip:{callbacks:{label:function(ctx){return ctx.label+': $'+(ctx.parsed/100).toFixed(2);}}}}}
+  });
+  // Grouped bar: income vs expenses by category
+  new Chart(document.getElementById('txnBarChart').getContext('2d'),{
+    type:'bar',data:{labels:txnCatLabels,datasets:[
+      {label:'Income',data:txnCatIncome,backgroundColor:'rgba(16,185,129,0.7)',borderRadius:4},
+      {label:'Expenses',data:txnCatExpenses.map(v=>-v),backgroundColor:'rgba(248,113,113,0.7)',borderRadius:4}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#e2e8f0',padding:10}},tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+': $'+(Math.abs(ctx.parsed.y)/100).toFixed(2);}}}},scales:{y:{ticks:{callback:function(v){return '$'+(Math.abs(v)/100).toFixed(0);}},grid:{color:'#334155'}},x:{grid:{color:'#334155'},ticks:{font:{size:10}}}}}
+  });
+}
 "#))
             }
         },
         Some(&user),
         false,
+        "stats",
     ))
 }
 
 pub async fn not_found(State(_state): State<AppState>) -> impl IntoResponse {
-    layout(
-        "Not Found",
-        maud::html! {
-            div class="empty-state" {
-                h1 { "404" }
-                p { "The page you're looking for doesn't exist." }
-                a href="/" class="btn" { "Go home" }
-            }
-        },
-        None,
-        false,
+    (
+        axum::http::StatusCode::NOT_FOUND,
+        layout(
+            "Not Found",
+            maud::html! {
+                div class="empty-state" {
+                    h1 { "404" }
+                    p { "The page you're looking for doesn't exist." }
+                    a href="/" class="btn" { "Go home" }
+                }
+            },
+            None,
+            false,
+        ),
     )
 }
 
@@ -988,41 +1081,36 @@ pub async fn dashboard(
 
     // Pull quick stats for the dashboard
     let pool = state.db();
-    let portfolios = portfolio::list_portfolios(pool).await?;
+    let portfolios = portfolio::list_portfolios(pool, &user.0).await?;
     let total_portfolios = portfolios.len();
 
-    // Net worth from latest balance logs across all portfolios
-    let mut total_net: i64 = 0;
-    let mut total_items = 0usize;
-    for (pid, _name) in &portfolios {
-        let items = portfolio::list_wealth_items(pool, *pid).await?;
-        let logs = portfolio::list_balance_logs(pool, *pid).await?;
-        let mut latest_per_item: std::collections::HashMap<uuid::Uuid, (NaiveDate, i64)> = std::collections::HashMap::new();
-        for l in &logs {
-            let entry = latest_per_item.entry(l.item_id).or_insert((l.log_date, l.balance_value));
-            if l.log_date > entry.0 { *entry = (l.log_date, l.balance_value); }
-        }
-        for item in &items {
-            if let Some((_, val)) = latest_per_item.get(&item.item_id) {
-                total_net += if item.item_type == "debt" { -val } else { *val };
-            }
-        }
-        total_items += items.len();
+    // Batch fetch all items and logs for user (avoids N+1 per-portfolio queries)
+    let all_items = portfolio::list_all_wealth_items_for_user(pool, &user.0).await?;
+    let all_logs = portfolio::list_all_balance_logs_for_user(pool, &user.0).await?;
+    let mut latest_per_item: std::collections::HashMap<uuid::Uuid, (NaiveDate, i64)> = std::collections::HashMap::new();
+    for l in &all_logs {
+        let entry = latest_per_item.entry(l.item_id).or_insert((l.log_date, l.balance_value));
+        if l.log_date > entry.0 { *entry = (l.log_date, l.balance_value); }
     }
+    let mut total_net: i64 = 0;
+    for item in &all_items {
+        if let Some((_, val)) = latest_per_item.get(&item.item_id) {
+            total_net += if item.item_type == "debt" { -val } else { *val };
+        }
+    }
+    let total_items = all_items.len();
 
-    let txns = crate::models::features::list_transactions(pool, None, None, None, None).await?;
-    let total_txns = txns.len();
-    let month_income: i64 = txns.iter().filter(|t| t.amount > 0).map(|t| t.amount).sum();
-    let month_expenses: i64 = txns.iter().filter(|t| t.amount < 0).map(|t| t.amount.abs()).sum();
+    let total_txns = crate::models::features::count_transactions(pool, &user.0, None, None, None, None, None).await?;
+    let (month_income, month_expenses) = crate::models::features::sum_transactions(pool, &user.0, None, None, None, None, None).await?;
 
-    let goals = crate::models::features::list_savings_goals(pool).await?;
+    let goals = crate::models::features::list_savings_goals(pool, &user.0).await?;
     let total_goals = goals.len();
 
     let net_cls = if total_net >= 0 { "positive" } else { "negative" };
     let month_net = month_income - month_expenses;
     let month_cls = if month_net >= 0 { "positive" } else { "negative" };
 
-    Ok(layout(
+    Ok(active(
         "Dashboard",
         maud::html! {
             h2 class="greeting" { (greeting) ", " (user.0) }
@@ -1068,6 +1156,7 @@ pub async fn dashboard(
         },
         Some(&user),
         false,
+        "dashboard",
     ))
 }
 

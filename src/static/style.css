@@ -71,6 +71,12 @@ nav {
     color: var(--text);
 }
 
+.nav-links a.active,
+.nav-link.active {
+    background: var(--primary);
+    color: #fff;
+}
+
 .nav-user {
     display: flex;
     align-items: center;
@@ -438,6 +444,21 @@ button:hover {
     font-size: 1rem;
 }
 
+.portfolio-meta {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+
+.portfolio-meta.positive {
+    color: var(--green);
+}
+
+.portfolio-meta.negative {
+    color: var(--red);
+}
+
 .portfolio-info p {
     margin: 0.15rem 0 0;
     font-size: 0.75rem;
@@ -690,6 +711,20 @@ td.editable:hover {
     flex-wrap: wrap;
 }
 
+.quick-select {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.quick-select-label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
 .filter-form label {
     display: flex;
     flex-direction: column;
@@ -834,6 +869,87 @@ td.editable:hover {
 
 .data-table tr:hover td {
     background: var(--surface2);
+}
+
+/* ── Responsive tables ── */
+
+.table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -0.5rem;
+    padding: 0 0.5rem;
+}
+
+@media (max-width: 768px) {
+    .data-table th,
+    .data-table td {
+        padding: 0.4rem 0.5rem;
+        font-size: 0.8rem;
+        white-space: nowrap;
+    }
+
+    .data-table th:last-child,
+    .data-table td:last-child {
+        white-space: normal;
+    }
+
+    .filter-form {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .filter-form label {
+        width: 100%;
+    }
+
+    .filter-form select,
+    .filter-form input {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .filter-form .btn {
+        align-self: flex-start;
+    }
+
+    .content-card-header {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .content-card-header div {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+
+    .summary-cards {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .goals-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .goal-actions {
+        flex-direction: column;
+    }
+
+    .goal-actions form,
+    .goal-actions a {
+        width: 100%;
+    }
+
+    .pagination {
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+
+    .pagination a,
+    .pagination span {
+        padding: 0.35rem 0.5rem;
+        font-size: 0.8rem;
+    }
 }
 
 /* ── Content card ── */
@@ -1106,4 +1222,72 @@ body > main > form {
 
 .btn-view:hover {
     background: var(--accent-hover);
+}
+
+/* ── Pagination ── */
+
+.pagination {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 0 0.5rem;
+    flex-wrap: wrap;
+}
+
+.pagination .page-info {
+    margin-right: auto;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+}
+
+.pagination .btn-disabled {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+/* ── Flash messages ── */
+
+.flash {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: opacity 0.4s ease;
+}
+
+.flash-success {
+    background: var(--positive-bg, #1a3a2a);
+    color: var(--positive, #4caf50);
+    border: 1px solid var(--positive, #4caf50);
+}
+
+.flash-error {
+    background: var(--danger-bg, #3a1a1a);
+    color: var(--danger, #ef4444);
+    border: 1px solid var(--danger, #ef4444);
+}
+
+.flash-warning {
+    background: var(--warning-bg, #3a3a1a);
+    color: var(--warning, #f59e0b);
+    border: 1px solid var(--warning, #f59e0b);
+}
+
+.flash-close {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+    opacity: 0.7;
+}
+
+.flash-close:hover {
+    opacity: 1;
 }

@@ -3,6 +3,7 @@ use axum::response::IntoResponse;
 use axum::response::Response;
 use crate::layout::error_box;
 
+#[derive(Debug)]
 pub enum AppError {
     Internal(anyhow::Error),
     BadRequest(String),
@@ -19,6 +20,12 @@ impl From<sqlx::Error> for AppError {
 impl From<bcrypt::BcryptError> for AppError {
     fn from(err: bcrypt::BcryptError) -> Self {
         AppError::Internal(err.into())
+    }
+}
+
+impl From<String> for AppError {
+    fn from(msg: String) -> Self {
+        AppError::BadRequest(msg)
     }
 }
 

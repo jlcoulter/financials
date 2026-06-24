@@ -3,6 +3,9 @@ name = "rust-web"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
 anyhow = "1.0.102"
 axum = "0.8.9"
@@ -19,3 +22,8 @@ time = "0.3.49"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = {version = "1.23.3", features = ["v7", "serde"]}
+csv = "1.4.0"
+
+[dev-dependencies]
+tower = "0.5"
+http-body-util = "0.1"

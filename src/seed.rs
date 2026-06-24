@@ -16,11 +16,21 @@ pub async fn seed_if_empty(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 pub async fn seed(pool: &SqlitePool) -> anyhow::Result<()> {
+    // ── Create demo user first (needed for FK) ──
+    let seed_user = "demo";
+    let hash = bcrypt::hash("demo", bcrypt::DEFAULT_COST)?;
+    sqlx::query("INSERT OR IGNORE INTO users (username, password_hash) VALUES (?, ?)")
+        .bind(seed_user)
+        .bind(&hash)
+        .execute(pool)
+        .await?;
+
     // ── Portfolio: "Family Finances" ──
     let portfolio_id = Uuid::now_v7();
-    sqlx::query("INSERT INTO portfolios (portfolio_id, name) VALUES (?, ?)")
+    sqlx::query("INSERT INTO portfolios (portfolio_id, name, user_id) VALUES (?, ?, ?)")
         .bind(portfolio_id.to_string())
         .bind("Family Finances")
+        .bind(seed_user)
         .execute(pool)
         .await?;
 
@@ -534,10 +544,12 @@ pub async fn seed(pool: &SqlitePool) -> anyhow::Result<()> {
         ("2025-06-20", -350_00, "Entertainment", "Summer concert", "expense"),
     ];
 
+    let seed_user = "demo";
+
     for (date, amount, category, description, txn_type) in &transactions {
         let id = Uuid::now_v7();
         sqlx::query(
-            "INSERT INTO transactions (txn_id, txn_date, amount, category, description, txn_type) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO transactions (txn_id, txn_date, amount, category, description, txn_type, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id.to_string())
         .bind(*date)
@@ -545,6 +557,7 @@ pub async fn seed(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(*category)
         .bind(*description)
         .bind(*txn_type)
+        .bind(seed_user)
         .execute(pool)
         .await?;
     }
@@ -565,12 +578,13 @@ pub async fn seed(pool: &SqlitePool) -> anyhow::Result<()> {
     for (category, month, planned) in &budgets {
         let id = Uuid::now_v7();
         sqlx::query(
-            "INSERT INTO budgets (budget_id, category, month, planned_amount) VALUES (?, ?, ?, ?)",
+            "INSERT INTO budgets (budget_id, category, month, planned_amount, user_id) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(id.to_string())
         .bind(*category)
         .bind(*month)
         .bind(*planned)
+        .bind(seed_user)
         .execute(pool)
         .await?;
     }
@@ -586,7 +600,7 @@ pub async fn seed(pool: &SqlitePool) -> anyhow::Result<()> {
     for (name, target, current, target_date, category) in &goals {
         let id = Uuid::now_v7();
         sqlx::query(
-            "INSERT INTO savings_goals (goal_id, name, target_amount, current_amount, target_date, category) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO savings_goals (goal_id, name, target_amount, current_amount, target_date, category, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id.to_string())
         .bind(*name)
@@ -594,6 +608,7 @@ pub async fn seed(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(*current)
         .bind(*target_date)
         .bind(*category)
+        .bind(seed_user)
         .execute(pool)
         .await?;
     }
@@ -608,12 +623,13 @@ pub async fn seed(pool: &SqlitePool) -> anyhow::Result<()> {
     for (name, start, end) in &holidays {
         let id = Uuid::now_v7();
         sqlx::query(
-            "INSERT INTO holidays (holiday_id, name, start_date, end_date) VALUES (?, ?, ?, ?)",
+            "INSERT INTO holidays (holiday_id, name, start_date, end_date, user_id) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(id.to_string())
         .bind(*name)
         .bind(*start)
         .bind(*end)
+        .bind(seed_user)
         .execute(pool)
         .await?;
     }
