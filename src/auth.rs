@@ -38,17 +38,21 @@ pub async fn login_post(
     jar: SignedCookieJar,
     Form(form): Form<LoginForm>,
 ) -> Result<axum::response::Response, AppError> {
-    match user::get_password_hash(state.db(), &form.username).await? {
-        Some(stored_hash) => {
-            let valid = bcrypt::verify(&form.password, &stored_hash)?;
+    match user::get_user_by_username(state.db(), &form.username).await? {
+        Some((user_id, hash)) => {
+            let valid = bcrypt::verify(&form.password, &hash)?;
             if valid {
-                let jar = jar.add(login_cookie(&form.username));
+                let jar = jar.add(login_cookie(user_id));
                 Ok((jar, [("HX-Redirect", "/dashboard")]).into_response())
             } else {
-                Err(AppError::Unauthorized("Invalid username or password".to_string()))
+                Err(AppError::Unauthorized(
+                    "Invalid username or password".to_string(),
+                ))
             }
         }
-        None => Err(AppError::Unauthorized("Invalid username or password".to_string())),
+        None => Err(AppError::Unauthorized(
+            "Invalid username or password".to_string(),
+        )),
     }
 }
 
@@ -87,11 +91,13 @@ pub async fn signup_post(
         return Err(AppError::BadRequest("Username is required".to_string()));
     }
     if form.password.len() < 8 {
-        return Err(AppError::BadRequest("Password must be at least 8 characters".to_string()));
+        return Err(AppError::BadRequest(
+            "Password must be at least 8 characters".to_string(),
+        ));
     }
     let hash = bcrypt::hash(&form.password, bcrypt::DEFAULT_COST)?;
 
-    user::create_user(state.db(), &form.username.trim(), &hash).await?;
-    let jar = jar.add(login_cookie(&form.username));
+    let user_id = user::create_user(state.db(), &form.username.trim(), &hash).await?;
+    let jar = jar.add(login_cookie(user_id));
     Ok((jar, [("HX-Redirect", "/dashboard")]).into_response())
 }

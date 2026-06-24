@@ -13,8 +13,8 @@ pub fn layout(title: &str, content: maud::Markup, username: Option<&LoggedInUser
             }
             body {
                 header {
-                    @if let Some(name) = username {
-                        span { "Hello " (name.0) }
+                    @if let Some(_name) = username {
+                        span { "Hello!"  }
                         form action = "/logout"
                         method = "post" {
                             button type = "submit" class="btn btn-ghost" {"Logout"}

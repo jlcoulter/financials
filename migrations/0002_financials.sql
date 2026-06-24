@@ -1,15 +1,18 @@
 CREATE TABLE portfolios (
 	portfolio_id UUID PRIMARY KEY,
+	user_id UUID NOT NULL REFERENCES users(user_id),
 	name VARCHAR(255) NOT NULL,
-	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	deleted_at TIMESTAMP
+	);
 
 CREATE TABLE wealth_items (
 	item_id UUID PRIMARY KEY,
-	portfolio_id INT NOT NULL REFERENCES portfolios(portfolio_id) ON DELETE CASCADE,
+	portfolio_id UUID NOT NULL REFERENCES portfolios(portfolio_id) ON DELETE CASCADE,
 	name VARCHAR(255) NOT NULL,
 	item_type VARCHAR(50) NOT NULL,
 	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	deleted_at TIMESTAMP,
 
 	CONSTRAINT unique_item_name_per_portfolio UNIQUE (portfolio_id, name)
 );
@@ -20,6 +23,7 @@ CREATE TABLE balance_logs (
 	log_date DATE NOT NULL,
 	balance_value BIGINT NOT NULL,
 	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	deleted_at TIMESTAMP,
 
 	CONSTRAINT unique_item_balance_per_data UNIQUE (item_id, log_date)
 );
