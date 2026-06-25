@@ -116,3 +116,20 @@ pub async fn list_portfolios(
         })
         .collect()
 }
+
+pub async fn list_portfolio(
+    pool: &SqlitePool,
+    portfolio_id: Uuid,
+    user_id: Uuid,
+) -> Result<(Uuid, String), AppError> {
+    let row = sqlx::query_as::<_, (String, String)>(
+        "SELECT portfolio_id, name FROM portfolios WHERE portfolio_id = ? AND user_id = ? AND deleted_at IS NULL",
+    )
+        .bind(portfolio_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_optional(pool)
+        .await?
+    .ok_or_else(|| AppError::BadRequest("Portfolio not found".into()))?;
+    let id = Uuid::parse_str(&row.0)?;
+    Ok((id, row.1))
+}

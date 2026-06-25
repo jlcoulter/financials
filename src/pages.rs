@@ -3,8 +3,9 @@ use crate::cookies::LoggedInUser;
 use crate::error::AppError;
 use crate::layout::layout;
 use crate::models::portfolio::list_portfolios;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::response::IntoResponse;
+use uuid::Uuid;
 
 pub async fn hello(
     State(_state): State<AppState>,
@@ -45,6 +46,14 @@ pub async fn portfolios(
         },
         Some(&user),
     ))
+}
+
+pub async fn portfolio(
+    Path(portfoio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<maud::Markup, AppError> {
+    todo!()
 }
 
 pub async fn dashboard(user: LoggedInUser) -> impl IntoResponse {
