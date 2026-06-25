@@ -26,7 +26,7 @@ pub async fn portfolios(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let portfolios = list_portfolios(state.db()).await?;
+    let portfolios = list_portfolios(state.db(), user.0).await?;
     Ok(layout(
         "Portfolios",
         maud::html! {

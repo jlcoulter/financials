@@ -1,7 +1,7 @@
+use crate::layout::error_box;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
-use crate::layout::error_box;
 
 pub enum AppError {
     Internal(anyhow::Error),
@@ -12,6 +12,18 @@ pub enum AppError {
 
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
+        AppError::Internal(err.into())
+    }
+}
+
+impl From<uuid::Error> for AppError {
+    fn from(err: uuid::Error) -> Self {
+        AppError::Internal(err.into())
+    }
+}
+
+impl From<chrono::ParseError> for AppError {
+    fn from(err: chrono::ParseError) -> Self {
         AppError::Internal(err.into())
     }
 }
@@ -29,9 +41,7 @@ impl IntoResponse for AppError {
                 tracing::error!(%err, "internal error");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
             }
-            AppError::BadRequest(msg) => {
-                (StatusCode::BAD_REQUEST, error_box(&msg)).into_response()
-            }
+            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, error_box(&msg)).into_response(),
             AppError::Unauthorized(msg) => {
                 (StatusCode::UNAUTHORIZED, error_box(&msg)).into_response()
             }
