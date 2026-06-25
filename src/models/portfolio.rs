@@ -117,7 +117,7 @@ pub async fn list_portfolios(
         .collect()
 }
 
-pub async fn list_portfolio(
+pub async fn get_portfolio(
     pool: &SqlitePool,
     portfolio_id: Uuid,
     user_id: Uuid,

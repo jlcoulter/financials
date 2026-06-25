@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::cookies::LoggedInUser;
 use crate::error::AppError;
 use crate::layout::layout;
-use crate::models::portfolio::list_portfolios;
+use crate::models::portfolio;
 use axum::extract::{Path, State};
 use axum::response::IntoResponse;
 use uuid::Uuid;
@@ -27,7 +27,7 @@ pub async fn portfolios(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let portfolios = list_portfolios(state.db(), user.0).await?;
+    let portfolios = portfolio::list_portfolios(state.db(), user.0).await?;
     Ok(layout(
         "Portfolios",
         maud::html! {
@@ -49,11 +49,31 @@ pub async fn portfolios(
 }
 
 pub async fn portfolio(
-    Path(portfoio_id): Path<Uuid>,
+    Path(portfolio_id): Path<Uuid>,
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    todo!()
+    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+    Ok(layout(
+        &format!("portfolio - {}", name),
+        maud::html! {
+            a href="/portfolios" { "<- Back" }
+            h2 { (name) }
+
+            @if items.is_empty() {
+                p { "No wealth items yet. Add one to start tracking." }
+            }
+                @else {
+                ul {
+                    @for item in &items {
+                        li { (item.name) " - " (item.item_type) }
+                    }
+                }
+            }
+        },
+        Some(&user),
+    ))
 }
 
 pub async fn dashboard(user: LoggedInUser) -> impl IntoResponse {
