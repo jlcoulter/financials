@@ -31,6 +31,23 @@ pub struct AddItemForm {
     pub item_type: String,
 }
 
+#[derive(serde::Deserialize)]
+pub struct CreatePortfolioForm {
+    pub name: String,
+}
+
+pub async fn create_portfolio(
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<CreatePortfolioForm>,
+) -> Result<axum::response::Redirect, AppError> {
+    if form.name.trim().is_empty() {
+        return Err(AppError::BadRequest("Portfolio name is required".into()));
+    }
+    portfolio::create_portfolio(state.db(), user.0, form.name.trim()).await?;
+    Ok(axum::response::Redirect::to("/portfolios"))
+}
+
 pub async fn add_item(
     Path(portfolio_id): Path<Uuid>,
     State(state): State<AppState>,
@@ -53,6 +70,15 @@ pub async fn portfolios(
     Ok(layout(
         "Portfolios",
         maud::html! {
+            details {
+                summary { "+ New Portfolio" }
+                form method="post" action="/portfolios" {
+                    label { "Name"
+                        input type="text" name="name" required {}
+                    }
+                    button type="submit" { "Create" }
+                }
+            }
             div class="portfolio-list"{
                 @for (id, name) in portfolios {
                     div class="portfolio-row" id=(format!("portfolio-{}", id)){
@@ -77,6 +103,13 @@ pub async fn portfolio(
 ) -> Result<maud::Markup, AppError> {
     let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
     let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+
+    let item_names: std::collections::HashMap<Uuid, String> = items
+        .iter()
+        .map(|i| (i.item_id, i.name.clone()))
+        .collect();
+
     Ok(layout(
         &format!("portfolio - {}", name),
         maud::html! {
@@ -123,6 +156,26 @@ pub async fn portfolio(
                         }
                     }
                             button type="submit" { "Save Row" }
+                    }
+                }
+            }
+            @if !logs.is_empty(){
+                table {
+                    thead {
+                        tr {
+                            th {"Date"}
+                            th {"Item"}
+                            th {"Value"}
+                        }
+                    }
+                    tbody {
+                        @for log in &logs {
+                            tr {
+                                td {(log.log_date)}
+                                td {(item_names.get(&log.item_id).map(|n| n.as_str()).unwrap_or("Unknown"))}
+                                td {(utils::format_cents(log.balance_value))}
+                            }
+                        }
                     }
                 }
             }
