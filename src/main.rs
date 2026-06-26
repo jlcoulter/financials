@@ -60,6 +60,7 @@ fn app(state: AppState) -> Router {
         .route("/logout", axum::routing::post(auth::logout_post))
         .route("/portfolios", axum::routing::get(pages::portfolios))
         .route("/portfolio:id", axum::routing::get(pages::portfolio))
+        .route("/portfolio/:id/items", axum::routing::get(pages::add_item))
         .nest_service("/static", ServeDir::new("src/static"))
         .fallback(pages::not_found)
         .with_state(state)

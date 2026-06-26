@@ -23,6 +23,26 @@ pub async fn hello(
     )
 }
 
+#[derive(serde::Deserialize)]
+pub struct AddItemForm {
+    pub name: String,
+    pub item_type: String,
+}
+
+pub async fn add_item(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<AddItemForm>,
+) -> Result<axum::response::Redirect, AppError> {
+    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::create_wealth_item(state.db(), portfolio_id, &form.name, &form.item_type).await?;
+    Ok(axum::response::Redirect::to(&format!(
+        "/portfolio/{}",
+        portfolio_id
+    )))
+}
+
 pub async fn portfolios(
     State(state): State<AppState>,
     user: LoggedInUser,
@@ -61,6 +81,22 @@ pub async fn portfolio(
             a href="/portfolios" { "<- Back" }
             h2 { (name) }
 
+            details {
+                summary { "+ Add Wealth Item"}
+                form method="post" action=(format!("/portfolio/{}/items")) {
+                    label { "Name"
+                    input type="text" name="name" required {}
+            }
+            label {"Type"
+        select name="item_type" {
+            option value="asset" {"Asset"}
+            option value="debt" {"Debt"}
+            option value="investment" {"Investment"}
+        }
+        }
+            button type="submit" {"Add Item"}
+                }
+            }
             @if items.is_empty() {
                 p { "No wealth items yet. Add one to start tracking." }
             }
