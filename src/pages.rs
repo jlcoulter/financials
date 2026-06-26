@@ -186,23 +186,25 @@ pub async fn portfolio(
                 }
             }
             @if !items.is_empty() {
-                table {
-                    thead {
-                        tr {
-                            th { "Date" }
-                            @for item in &items {
-                                th { (item.name) }
+                div class="grid-wrapper" {
+                    table {
+                        thead {
+                            tr {
+                                th { "Date" }
+                                @for item in &items {
+                                    th { (item.name) }
+                                }
                             }
                         }
-                    }
-                    tbody {
-                        @for row in &grid_rows {
-                            tr {
-                                td { (row.date) }
-                                @for val in &row.values {
-                                    @match val {
-                                        Some(cents) => td { (utils::format_cents(*cents)) }
-                                        None => td { "\u{2014}" }
+                        tbody {
+                            @for row in &grid_rows {
+                                tr {
+                                    td { (row.date) }
+                                    @for val in &row.values {
+                                        @match val {
+                                            Some(cents) => td { (utils::format_cents(*cents)) }
+                                            None => td class="empty" { "\u{2014}" }
+                                        }
                                     }
                                 }
                             }

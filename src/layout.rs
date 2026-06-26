@@ -9,7 +9,7 @@ pub fn layout(title: &str, content: maud::Markup, username: Option<&LoggedInUser
                 script {
                     (maud::PreEscaped("document.addEventListener('htmx:beforeSwap', function(e) { if(e.detail.xhr.status >= 400) e.detail.shouldSwap = true; });"))
                 }
-                link rel="stylesheet" href="/static/style.css"{}
+                link rel="stylesheet" href="/static/style.css";
             }
             body {
                 header {
