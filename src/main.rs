@@ -4,6 +4,7 @@ mod error;
 mod layout;
 mod models;
 mod pages;
+mod utils;
 use std::str::FromStr;
 
 use axum::Router;

@@ -83,7 +83,7 @@ pub async fn portfolio(
 
             details {
                 summary { "+ Add Wealth Item"}
-                form method="post" action=(format!("/portfolio/{}/items")) {
+                form method="post" action=(format!("/portfolio/{}/items", portfolio_id)) {
                     label { "Name"
                     input type="text" name="name" required {}
             }
@@ -104,6 +104,23 @@ pub async fn portfolio(
                 ul {
                     @for item in &items {
                         li { (item.name) " - " (item.item_type) }
+                    }
+                }
+            }
+            @if !items.is_empty() {
+                details {
+                    summary { "+ Add Balance Row" }
+                    form method="post" action=(format!("/portfolio/{}/balances", portfolio_id)) {
+                        label { "Date"
+                            input type="date" name="log_date" required {}
+                        }
+                        @for item in &items {
+                            label { (item.name) input type="number" step="0.01"
+                                name=(format!("balance_{}", item.item_id))
+                            placeholder="$0.00" {}
+                        }
+                    }
+                            button type="submit" { "Save Row" }
                     }
                 }
             }
