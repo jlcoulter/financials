@@ -101,6 +101,26 @@ pub async fn insert_balance_log(
     Ok(id)
 }
 
+/// Upsert: update if (item_id, log_date) exists, insert otherwise.
+pub async fn upsert_balance_log(
+    pool: &SqlitePool,
+    item_id: Uuid,
+    log_date: NaiveDate,
+    balance_value: i64,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "INSERT INTO balance_logs (log_id, item_id, log_date, balance_value) VALUES (?, ?, ?, ?) \
+         ON CONFLICT(item_id, log_date) DO UPDATE SET balance_value = excluded.balance_value",
+    )
+    .bind(Uuid::now_v7().to_string())
+    .bind(item_id.to_string())
+    .bind(log_date.to_string())
+    .bind(balance_value)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn create_portfolio(
     pool: &SqlitePool,
     user_id: Uuid,

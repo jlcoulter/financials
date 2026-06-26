@@ -200,10 +200,28 @@ pub async fn portfolio(
                             @for row in &grid_rows {
                                 tr {
                                     td { (row.date) }
-                                    @for val in &row.values {
+                                    @for (idx, val) in row.values.iter().enumerate() {
+                                        @let item_id = items[idx].item_id;
+                                        @let cell_id = format!("cell-{}-{}", item_id, row.date);
                                         @match val {
-                                            Some(cents) => td { (utils::format_cents(*cents)) }
-                                            None => td class="empty" { "\u{2014}" }
+                                            Some(cents) => {
+                                                td id=(cell_id) class="editable"
+                                                   tabindex="0"
+                                                   hx-get=(format!("/portfolio/{}/cell?item_id={}&date={}", portfolio_id, item_id, row.date))
+                                                   hx-target=(format!("#{}", cell_id))
+                                                   hx-swap="outerHTML" {
+                                                    (utils::format_cents(*cents))
+                                                }
+                                            }
+                                            None => {
+                                                td id=(cell_id) class="editable empty"
+                                                   tabindex="0"
+                                                   hx-get=(format!("/portfolio/{}/cell?item_id={}&date={}", portfolio_id, item_id, row.date))
+                                                   hx-target=(format!("#{}", cell_id))
+                                                   hx-swap="outerHTML" {
+                                                    "\u{2014}"
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -242,6 +260,107 @@ pub async fn add_balance(
         "/portfolio/{}",
         portfolio_id
     )))
+}
+
+// ── Inline cell editing (HTMX) ──
+
+#[derive(serde::Deserialize)]
+pub struct CellQuery {
+    item_id: String,
+    date: String,
+}
+
+/// GET: return an inline form to edit one cell.
+pub async fn edit_cell(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::extract::Query(query): axum::extract::Query<CellQuery>,
+) -> Result<maud::Markup, AppError> {
+    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    let item_id = Uuid::parse_str(&query.item_id)?;
+    let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d")?;
+
+    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let current_cents = logs.iter()
+        .find(|l| l.item_id == item_id && l.log_date == date)
+        .map(|l| l.balance_value);
+
+    let cell_id = format!("cell-{}-{}", item_id, date);
+    let display_val = current_cents
+        .map(|c| {
+            let sign = if c < 0 { "-" } else { "" };
+            let abs = c.abs();
+            format!("{}{}.{:02}", sign, abs / 100, abs % 100)
+        })
+        .unwrap_or_default();
+
+    let cancel_url = format!("/portfolio/{}/cell?item_id={}&date={}", portfolio_id, item_id, date);
+    let target_sel = format!("#{}", cell_id);
+
+    Ok(maud::html! {
+        td id=(cell_id) class="editable" tabindex="0"
+           hx-get=(format!("/portfolio/{}/cell?item_id={}&date={}", portfolio_id, item_id, date))
+           hx-target=(format!("#{}", cell_id))
+           hx-swap="outerHTML" {
+            form class="cell-edit-form"
+                  hx-put=(format!("/portfolio/{}/cell", portfolio_id))
+                  hx-target=(format!("#{}", cell_id))
+                  hx-swap="outerHTML"
+                  hx-trigger="submit" {
+                input type="hidden" name="item_id" value=(item_id) {}
+                input type="hidden" name="date" value=(date) {}
+                input type="number" step="0.01" name="value"
+                       value=(display_val)
+                       class="cell-edit-input"
+                       autofocus {}
+            }
+        }
+    })
+}
+
+/// PUT: save the edited cell value, return the formatted display.
+pub async fn save_cell(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
+) -> Result<maud::Markup, AppError> {
+    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    let item_id_str = form.get("item_id")
+        .ok_or_else(|| AppError::BadRequest("Missing item_id".into()))?;
+    let item_id = Uuid::parse_str(item_id_str)?;
+    let date_str = form.get("date")
+        .ok_or_else(|| AppError::BadRequest("Missing date".into()))?;
+    let date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")?;
+    let value_str = form.get("value")
+        .ok_or_else(|| AppError::BadRequest("Missing value".into()))?;
+
+    let cell_id = format!("cell-{}-{}", item_id, date);
+
+    if value_str.trim().is_empty() {
+        return Ok(maud::html! {
+            td id=(cell_id) class="editable empty" tabindex="0"
+               hx-get=(format!("/portfolio/{}/cell?item_id={}&date={}", portfolio_id, item_id, date))
+               hx-target=(format!("#{}", cell_id))
+               hx-swap="outerHTML" {
+                "\u{2014}"
+            }
+        });
+    }
+
+    let cents = utils::parse_dollars(value_str)
+        .map_err(AppError::BadRequest)?;
+    portfolio::upsert_balance_log(state.db(), item_id, date, cents).await?;
+
+    Ok(maud::html! {
+        td id=(cell_id) class="editable" tabindex="0"
+           hx-get=(format!("/portfolio/{}/cell?item_id={}&date={}", portfolio_id, item_id, date))
+           hx-target=(format!("#{}", cell_id))
+           hx-swap="outerHTML" {
+            (utils::format_cents(cents))
+        }
+    })
 }
 
 pub async fn dashboard(user: LoggedInUser) -> impl IntoResponse {
