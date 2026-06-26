@@ -2,12 +2,42 @@ use crate::AppState;
 use crate::cookies::LoggedInUser;
 use crate::error::AppError;
 use crate::layout::layout;
-use crate::models::portfolio;
+use crate::models::portfolio::{self, WealthItem, BalanceLog};
 use crate::utils;
 use axum::extract::{Path, State};
 use axum::response::IntoResponse;
 use chrono::NaiveDate;
 use uuid::Uuid;
+
+struct GridRow {
+    date: NaiveDate,
+    values: Vec<Option<i64>>,
+}
+
+fn pivot_logs(items: &[WealthItem], logs: &[BalanceLog]) -> Vec<GridRow> {
+    let item_index: std::collections::HashMap<Uuid, usize> = items
+        .iter()
+        .enumerate()
+        .map(|(i, wi)| (wi.item_id, i))
+        .collect();
+
+    let mut by_date: std::collections::BTreeMap<NaiveDate, Vec<Option<i64>>> =
+        std::collections::BTreeMap::new();
+    for log in logs {
+        let row = by_date
+            .entry(log.log_date)
+            .or_insert_with(|| vec![None; items.len()]);
+        if let Some(&idx) = item_index.get(&log.item_id) {
+            row[idx] = Some(log.balance_value);
+        }
+    }
+
+    by_date
+        .into_iter()
+        .rev()
+        .map(|(date, values)| GridRow { date, values })
+        .collect()
+}
 
 pub async fn hello(
     State(_state): State<AppState>,
@@ -104,11 +134,7 @@ pub async fn portfolio(
     let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
     let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
     let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
-
-    let item_names: std::collections::HashMap<Uuid, String> = items
-        .iter()
-        .map(|i| (i.item_id, i.name.clone()))
-        .collect();
+    let grid_rows = pivot_logs(&items, &logs);
 
     Ok(layout(
         &format!("portfolio - {}", name),
@@ -159,21 +185,26 @@ pub async fn portfolio(
                     }
                 }
             }
-            @if !logs.is_empty(){
+            @if !items.is_empty() {
                 table {
                     thead {
                         tr {
-                            th {"Date"}
-                            th {"Item"}
-                            th {"Value"}
+                            th { "Date" }
+                            @for item in &items {
+                                th { (item.name) }
+                            }
                         }
                     }
                     tbody {
-                        @for log in &logs {
+                        @for row in &grid_rows {
                             tr {
-                                td {(log.log_date)}
-                                td {(item_names.get(&log.item_id).map(|n| n.as_str()).unwrap_or("Unknown"))}
-                                td {(utils::format_cents(log.balance_value))}
+                                td { (row.date) }
+                                @for val in &row.values {
+                                    @match val {
+                                        Some(cents) => td { (utils::format_cents(*cents)) }
+                                        None => td { "\u{2014}" }
+                                    }
+                                }
                             }
                         }
                     }
