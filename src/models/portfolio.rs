@@ -82,6 +82,25 @@ pub async fn list_balance_logs(
         .collect()
 }
 
+pub async fn insert_balance_log(
+    pool: &SqlitePool,
+    item_id: Uuid,
+    log_date: NaiveDate,
+    balance_value: i64,
+) -> Result<Uuid, AppError> {
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO balance_logs (log_id, item_id, log_date, balance_value) VALUES (?, ?, ?, ?)",
+    )
+    .bind(id.to_string())
+    .bind(item_id.to_string())
+    .bind(log_date.to_string())
+    .bind(balance_value)
+    .execute(pool)
+    .await?;
+    Ok(id)
+}
+
 pub async fn create_portfolio(
     pool: &SqlitePool,
     user_id: Uuid,

@@ -3,8 +3,10 @@ use crate::cookies::LoggedInUser;
 use crate::error::AppError;
 use crate::layout::layout;
 use crate::models::portfolio;
+use crate::utils;
 use axum::extract::{Path, State};
 use axum::response::IntoResponse;
+use chrono::NaiveDate;
 use uuid::Uuid;
 
 pub async fn hello(
@@ -127,6 +129,33 @@ pub async fn portfolio(
         },
         Some(&user),
     ))
+}
+
+pub async fn add_balance(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
+) -> Result<axum::response::Redirect, AppError> {
+    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+
+    let log_date_str = form
+        .get("log_date")
+        .ok_or_else(|| AppError::BadRequest("Missing log date field".into()))?;
+    let log_date = NaiveDate::parse_from_str(log_date_str, "%Y-%m-%d")?;
+    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+    for item in &items {
+        let key = format!("balance_{}", item.item_id);
+        if let Some(value) = form.get(&key) {
+            if let Ok(cents) = utils::parse_dollars(value) {
+                portfolio::insert_balance_log(state.db(), item.item_id, log_date, cents).await?;
+            }
+        }
+    }
+    Ok(axum::response::Redirect::to(&format!(
+        "/portfolio/{}",
+        portfolio_id
+    )))
 }
 
 pub async fn dashboard(user: LoggedInUser) -> impl IntoResponse {
