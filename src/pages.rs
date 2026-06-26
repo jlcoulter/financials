@@ -169,23 +169,14 @@ pub async fn portfolio(
                 }
             }
             @if !items.is_empty() {
-                details {
-                    summary { "+ Add Balance Row" }
-                    form method="post" action=(format!("/portfolio/{}/balances", portfolio_id)) {
-                        label { "Date"
-                            input type="date" name="log_date" required {}
-                        }
-                        @for item in &items {
-                            label { (item.name) input type="number" step="0.01"
-                                name=(format!("balance_{}", item.item_id))
-                            placeholder="$0.00" {}
-                        }
-                    }
-                            button type="submit" { "Save Row" }
+                div class="grid-header-bar" {
+                    form id="balance-add-form"
+                        hx-post=(format!("/portfolio/{}/balances", portfolio_id))
+                        hx-target="#blank-row"
+                        hx-swap="afterend" {
+                        button type="submit" class="btn btn-primary btn-xs" { "+ Add Row" }
                     }
                 }
-            }
-            @if !items.is_empty() {
                 div class="grid-wrapper" {
                     table {
                         thead {
@@ -197,6 +188,20 @@ pub async fn portfolio(
                             }
                         }
                         tbody {
+                            tr id="blank-row" class="blank-row" {
+                                td {
+                                    input type="date" name="log_date"
+                                           form="balance-add-form" required {}
+                                }
+                                @for item in &items {
+                                    td {
+                                        input type="number" step="0.01"
+                                               name=(format!("balance_{}", item.item_id))
+                                               form="balance-add-form"
+                                               placeholder="$0.00" {}
+                                    }
+                                }
+                            }
                             @for row in &grid_rows {
                                 tr {
                                     td { (row.date) }
@@ -240,7 +245,7 @@ pub async fn add_balance(
     State(state): State<AppState>,
     user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
-) -> Result<axum::response::Redirect, AppError> {
+) -> Result<maud::Markup, AppError> {
     portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
 
     let log_date_str = form
@@ -256,10 +261,53 @@ pub async fn add_balance(
             }
         }
     }
-    Ok(axum::response::Redirect::to(&format!(
-        "/portfolio/{}",
-        portfolio_id
-    )))
+
+    // Build the values for this date
+    let item_index: std::collections::HashMap<Uuid, usize> = items
+        .iter()
+        .enumerate()
+        .map(|(i, wi)| (wi.item_id, i))
+        .collect();
+
+    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let values: Vec<Option<i64>> = items
+        .iter()
+        .map(|item| {
+            logs.iter()
+                .find(|l| l.item_id == item.item_id && l.log_date == log_date)
+                .map(|l| l.balance_value)
+        })
+        .collect();
+
+    Ok(maud::html! {
+        tr {
+            td { (log_date) }
+            @for (idx, val) in values.iter().enumerate() {
+                @let item_id = items[idx].item_id;
+                @let cell_id = format!("cell-{}-{}", item_id, log_date);
+                @match val {
+                    Some(cents) => {
+                        td id=(cell_id) class="editable"
+                           tabindex="0"
+                           hx-get=(format!("/portfolio/{}/cell?item_id={}&date={}", portfolio_id, item_id, log_date))
+                           hx-target=(format!("#{}", cell_id))
+                           hx-swap="outerHTML" {
+                            (utils::format_cents(*cents))
+                        }
+                    }
+                    None => {
+                        td id=(cell_id) class="editable empty"
+                           tabindex="0"
+                           hx-get=(format!("/portfolio/{}/cell?item_id={}&date={}", portfolio_id, item_id, log_date))
+                           hx-target=(format!("#{}", cell_id))
+                           hx-swap="outerHTML" {
+                            "\u{2014}"
+                        }
+                    }
+                }
+            }
+        }
+    })
 }
 
 // ── Inline cell editing (HTMX) ──
@@ -313,6 +361,8 @@ pub async fn edit_cell(
                 input type="number" step="0.01" name="value"
                        value=(display_val)
                        class="cell-edit-input"
+                       hx-on--blur="this.closest('form').requestSubmit()"
+                       hx-on--keydown=(format!("if(event.key==='Enter'){{event.preventDefault();this.closest('form').requestSubmit()}}else if(event.key==='Escape'){{event.preventDefault();htmx.ajax('GET','{}',{{target:'{}',swap:'outerHTML'}})}}", cancel_url, target_sel))
                        autofocus {}
             }
         }
