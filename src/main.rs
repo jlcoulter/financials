@@ -66,6 +66,8 @@ fn app(state: AppState) -> Router {
         .route("/portfolio/{id}/balances", axum::routing::post(pages::add_balance))
         .route("/portfolio/{id}/cell", axum::routing::get(pages::edit_cell))
         .route("/portfolio/{id}/cell", axum::routing::put(pages::save_cell))
+        .route("/portfolio/{id}/rename-item", axum::routing::get(pages::edit_item_name))
+        .route("/portfolio/{id}/rename-item", axum::routing::put(pages::save_item_name))
         .nest_service("/static", ServeDir::new("src/static"))
         .fallback(pages::not_found)
         .with_state(state)

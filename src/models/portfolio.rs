@@ -121,6 +121,19 @@ pub async fn upsert_balance_log(
     Ok(())
 }
 
+pub async fn rename_wealth_item(
+    pool: &SqlitePool,
+    item_id: Uuid,
+    name: &str,
+) -> Result<(), AppError> {
+    sqlx::query("UPDATE wealth_items SET name = ? WHERE item_id = ?")
+        .bind(name)
+        .bind(item_id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn create_portfolio(
     pool: &SqlitePool,
     user_id: Uuid,

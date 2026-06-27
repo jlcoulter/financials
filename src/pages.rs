@@ -169,22 +169,21 @@ pub async fn portfolio(
                 }
             }
             @if !items.is_empty() {
-                div class="grid-header-bar" {
-                    form id="balance-add-form"
-                        hx-post=(format!("/portfolio/{}/balances", portfolio_id))
-                        hx-target="#blank-row"
-                        hx-swap="afterend" {
-                        button type="submit" class="btn btn-primary btn-xs" { "+ Add Row" }
-                    }
-                }
                 div class="grid-wrapper" {
                     table {
                         thead {
                             tr {
                                 th { "Date" }
                                 @for item in &items {
-                                    th { (item.name) }
+                                    th id=(format!("th-{}", item.item_id)) class="editable"
+                                       tabindex="0"
+                                       hx-get=(format!("/portfolio/{}/rename-item?item_id={}", portfolio_id, item.item_id))
+                                       hx-target=(format!("#th-{}", item.item_id))
+                                       hx-swap="outerHTML" {
+                                        (item.name)
+                                    }
                                 }
+                                th { "Total" }
                             }
                         }
                         tbody {
@@ -201,8 +200,22 @@ pub async fn portfolio(
                                                placeholder="$0.00" {}
                                     }
                                 }
+                                td class="row-total" {
+                                    form id="balance-add-form"
+                                        hx-post=(format!("/portfolio/{}/balances", portfolio_id))
+                                        hx-target="#blank-row"
+                                        hx-swap="afterend" {
+                                        button type="submit" class="btn btn-primary btn-xs" { "+ Add" }
+                                    }
+                                }
                             }
                             @for row in &grid_rows {
+                                @let total: i64 = row.values.iter().enumerate()
+                                    .filter_map(|(i, v)| match v {
+                                        Some(val) => Some(if items[i].item_type == "debt" { -*val } else { *val }),
+                                        None => None,
+                                    })
+                                    .sum();
                                 tr {
                                     td { (row.date) }
                                     @for (idx, val) in row.values.iter().enumerate() {
@@ -229,6 +242,7 @@ pub async fn portfolio(
                                             }
                                         }
                                     }
+                                    td class="row-total" { (utils::format_cents(total)) }
                                 }
                             }
                         }
@@ -279,6 +293,13 @@ pub async fn add_balance(
         })
         .collect();
 
+    let total: i64 = values.iter().enumerate()
+        .filter_map(|(i, v)| match v {
+            Some(val) => Some(if items[i].item_type == "debt" { -*val } else { *val }),
+            None => None,
+        })
+        .sum();
+
     Ok(maud::html! {
         tr {
             td { (log_date) }
@@ -306,6 +327,7 @@ pub async fn add_balance(
                     }
                 }
             }
+            td class="row-total" { (utils::format_cents(total)) }
         }
     })
 }
@@ -409,6 +431,76 @@ pub async fn save_cell(
            hx-target=(format!("#{}", cell_id))
            hx-swap="outerHTML" {
             (utils::format_cents(cents))
+        }
+    })
+}
+
+pub async fn edit_item_name(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::extract::Query(query): axum::extract::Query<CellQuery>,
+) -> Result<maud::Markup, AppError> {
+    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    let item_id = Uuid::parse_str(&query.item_id)?;
+
+    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+    let item = items.iter().find(|i| i.item_id == item_id)
+        .ok_or_else(|| AppError::BadRequest("Item not found".into()))?;
+
+    let th_id = format!("th-{}", item_id);
+    let cancel_url = format!("/portfolio/{}/rename-item?item_id={}", portfolio_id, item_id);
+    let target_sel = format!("#{}", th_id);
+
+    Ok(maud::html! {
+        th id=(th_id) class="editable" tabindex="0"
+           hx-get=(cancel_url)
+           hx-target=(target_sel)
+           hx-swap="outerHTML" {
+            form class="cell-edit-form"
+                  hx-put=(format!("/portfolio/{}/rename-item", portfolio_id))
+                  hx-target=(format!("#{}", th_id))
+                  hx-swap="outerHTML"
+                  hx-trigger="submit" {
+                input type="hidden" name="item_id" value=(item_id) {}
+                input type="text" name="name"
+                       value=(item.name)
+                       class="cell-edit-input"
+                       hx-on--blur="this.closest('form').requestSubmit()"
+                       hx-on--keydown=(format!("if(event.key==='Enter'){{event.preventDefault();this.closest('form').requestSubmit()}}else if(event.key==='Escape'){{event.preventDefault();htmx.ajax('GET','{}',{{target:'{}',swap:'outerHTML'}})}}", cancel_url, target_sel))
+                       autofocus {}
+            }
+        }
+    })
+}
+
+pub async fn save_item_name(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
+) -> Result<maud::Markup, AppError> {
+    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    let item_id_str = form.get("item_id")
+        .ok_or_else(|| AppError::BadRequest("Missing item_id".into()))?;
+    let item_id = Uuid::parse_str(item_id_str)?;
+    let name = form.get("name")
+        .ok_or_else(|| AppError::BadRequest("Missing name".into()))?;
+
+    if name.trim().is_empty() {
+        return Err(AppError::BadRequest("Item name cannot be empty".into()));
+    }
+
+    portfolio::rename_wealth_item(state.db(), item_id, name.trim()).await?;
+
+    let th_id = format!("th-{}", item_id);
+
+    Ok(maud::html! {
+        th id=(th_id) class="editable" tabindex="0"
+           hx-get=(format!("/portfolio/{}/rename-item?item_id={}", portfolio_id, item_id))
+           hx-target=(format!("#{}", th_id))
+           hx-swap="outerHTML" {
+            (name.trim())
         }
     })
 }
