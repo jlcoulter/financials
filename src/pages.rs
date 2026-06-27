@@ -92,6 +92,26 @@ pub async fn add_item(
     )))
 }
 
+#[derive(serde::Deserialize)]
+pub struct MoveItemQuery {
+    pub item_id: Uuid,
+    pub direction: String,
+}
+
+pub async fn move_item(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::extract::Query(query): axum::extract::Query<MoveItemQuery>,
+) -> Result<axum::response::Redirect, AppError> {
+    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::move_wealth_item(state.db(), portfolio_id, query.item_id, &query.direction).await?;
+    Ok(axum::response::Redirect::to(&format!(
+        "/portfolio/{}",
+        portfolio_id
+    )))
+}
+
 pub async fn portfolios(
     State(state): State<AppState>,
     user: LoggedInUser,
@@ -184,7 +204,7 @@ pub async fn portfolio(
                         thead {
                             tr {
                                 th { "Date" }
-                                @for item in &items {
+                                @for (idx, item) in items.iter().enumerate() {
                                     @let type_class = match item.item_type.as_str() {
                                         "debt" => "th--debt",
                                         "investment" => "th--investment",
@@ -197,6 +217,18 @@ pub async fn portfolio(
                                        hx-target=(format!("#th-{}", item.item_id))
                                        hx-swap="outerHTML" {
                                         (item.name)
+                                        span class="col-arrows" {
+                                            @if idx > 0 {
+                                                form method="post" action=(format!("/portfolio/{}/move-item?item_id={}&direction=left", portfolio_id, item.item_id)) {
+                                                    button type="submit" class="col-arrow-btn" title="Move left" { "←" }
+                                                }
+                                            }
+                                            @if idx < items.len() - 1 {
+                                                form method="post" action=(format!("/portfolio/{}/move-item?item_id={}&direction=right", portfolio_id, item.item_id)) {
+                                                    button type="submit" class="col-arrow-btn" title="Move right" { "→" }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 th { "Total" }

@@ -398,4 +398,27 @@ th.th--debt {
     border-bottom: 3px solid #ef4444;
 }
 
+.col-arrows {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+.col-arrow-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.7rem;
+    line-height: 1;
+    padding: 1px 4px;
+}
+
+.col-arrow-btn:hover {
+    background: var(--surface2);
+    color: var(--text);
+}
+
 

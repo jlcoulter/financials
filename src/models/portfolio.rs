@@ -7,6 +7,7 @@ pub struct WealthItem {
     pub item_id: Uuid,
     pub name: String,
     pub item_type: String,
+    pub position: i32,
 }
 
 pub struct BalanceLog {
@@ -20,20 +21,21 @@ pub async fn list_wealth_items(
     pool: &SqlitePool,
     portfolio_id: Uuid,
 ) -> Result<Vec<WealthItem>, AppError> {
-    let rows = sqlx::query_as::<_,(String, String, String)>(
-        "SELECT item_id, name, item_type FROM wealth_items WHERE portfolio_id = ? AND deleted_at IS NULL ORDER BY created_at",
+    let rows = sqlx::query_as::<_,(String, String, String, i32)>(
+        "SELECT item_id, name, item_type, position FROM wealth_items WHERE portfolio_id = ? AND deleted_at IS NULL ORDER BY position, created_at",
     )
         .bind(portfolio_id.to_string())
         .fetch_all(pool)
         .await?;
 
     rows.into_iter()
-        .map(|(id_str, name, item_type)| {
+        .map(|(id_str, name, item_type, position)| {
             let item_id = Uuid::parse_str(&id_str)?;
             Ok(WealthItem {
                 item_id,
                 name,
                 item_type,
+                position,
             })
         })
         .collect()
@@ -56,6 +58,36 @@ pub async fn create_wealth_item(
     .execute(pool)
     .await?;
     Ok(id)
+}
+
+pub async fn move_wealth_item(
+    pool: &SqlitePool,
+    portfolio_id: Uuid,
+    item_id: Uuid,
+    direction: &str,
+) -> Result<(), AppError> {
+    let items = list_wealth_items(pool, portfolio_id).await?;
+    let idx = items.iter().position(|i| i.item_id == item_id)
+        .ok_or_else(|| AppError::BadRequest("Item not found".into()))?;
+
+    let swap_idx = match direction {
+        "left" if idx > 0 => idx - 1,
+        "right" if idx < items.len() - 1 => idx + 1,
+        _ => return Ok(()), // already at edge, no-op
+    };
+
+    let a = &items[idx];
+    let b = &items[swap_idx];
+
+    // Swap positions
+    sqlx::query("UPDATE wealth_items SET position = ? WHERE item_id = ?")
+        .bind(b.position).bind(a.item_id.to_string())
+        .execute(pool).await?;
+    sqlx::query("UPDATE wealth_items SET position = ? WHERE item_id = ?")
+        .bind(a.position).bind(b.item_id.to_string())
+        .execute(pool).await?;
+
+    Ok(())
 }
 
 pub async fn list_balance_logs(
