@@ -120,6 +120,18 @@ a {
     padding: 20px;
 }
 
+a.card {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+a.card:hover {
+    border-color: var(--accent);
+    background: var(--surface2);
+}
+
 .card h3 {
     margin: 0 0 8px 0;
 }

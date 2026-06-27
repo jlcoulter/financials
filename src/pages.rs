@@ -739,15 +739,15 @@ pub async fn dashboard(user: LoggedInUser) -> impl IntoResponse {
         "Dashboard",
         maud::html! {
             h2 { (greeting) ", " (user.0) }
-            div class="cards"{
-            div class="card" {
-                h3 {"Your Account"}
-                p { "Manage your profile and settings" }
-            }
+            div class="cards" {
+                a href="/portfolios" class="card" {
+                    h3 { "Portfolios" }
+                    p { "View and manage your portfolios" }
+                }
                 div class="card" {
-                h3 {"Activity"}
-                p {"View your recent activity"}
-            }
+                    h3 { "Activity" }
+                    p { "View your recent activity" }
+                }
             }
         },
         Some(&user),
