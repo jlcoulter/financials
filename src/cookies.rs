@@ -7,8 +7,9 @@ use axum::http::request::Parts;
 use axum_extra::extract::SignedCookieJar;
 use axum_extra::extract::cookie::Cookie;
 use axum_extra::extract::cookie::Key;
+use uuid::Uuid;
 
-pub struct LoggedInUser(pub String);
+pub struct LoggedInUser(pub Uuid);
 
 impl FromRef<AppState> for Key {
     fn from_ref(state: &AppState) -> Self {
@@ -26,8 +27,8 @@ impl FromRequestParts<AppState> for LoggedInUser {
         let jar: SignedCookieJar<Key> = SignedCookieJar::from_request_parts(parts, state)
             .await
             .map_err(|_| StatusCode::UNAUTHORIZED)?;
-        jar.get("username")
-            .map(|c| LoggedInUser(c.value().to_string()))
+        jar.get("user_id")
+            .and_then(|c| Uuid::parse_str(c.value()).map(LoggedInUser).ok())
             .ok_or(StatusCode::UNAUTHORIZED)
     }
 }
@@ -43,20 +44,20 @@ impl OptionalFromRequestParts<AppState> for LoggedInUser {
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         Ok(jar
-            .get("username")
-            .map(|c| LoggedInUser(c.value().to_string())))
+            .get("user_id")
+            .and_then(|c| Uuid::parse_str(c.value()).map(LoggedInUser).ok()))
     }
 }
 
-pub fn login_cookie(username: &str) -> Cookie<'static> {
-    Cookie::build(("username", username.to_string()))
+pub fn login_cookie(user_id: Uuid) -> Cookie<'static> {
+    Cookie::build(("user_id", user_id.to_string()))
         .http_only(true)
         .path("/")
         .build()
 }
 
 pub fn logout_cookie() -> Cookie<'static> {
-    Cookie::build(("username", ""))
+    Cookie::build(("user_id", ""))
         .path("/")
         .max_age(time::Duration::ZERO)
         .build()

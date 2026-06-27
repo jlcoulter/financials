@@ -4,6 +4,7 @@ mod error;
 mod layout;
 mod models;
 mod pages;
+mod utils;
 use std::str::FromStr;
 
 use axum::Router;
@@ -57,8 +58,24 @@ fn app(state: AppState) -> Router {
         .route("/login", axum::routing::get(auth::login))
         .route("/login", axum::routing::post(auth::login_post))
         .route("/dashboard", axum::routing::get(pages::dashboard))
+        .route("/insights", axum::routing::get(pages::insights))
+        .route("/insights/{id}", axum::routing::get(pages::insights_chart))
         .route("/logout", axum::routing::post(auth::logout_post))
         .route("/portfolios", axum::routing::get(pages::portfolios))
+        .route("/portfolios", axum::routing::post(pages::create_portfolio))
+        .route("/portfolio/{id}", axum::routing::get(pages::portfolio))
+        .route("/portfolio/{id}/items", axum::routing::post(pages::add_item))
+        .route("/portfolio/{id}/rename", axum::routing::post(pages::rename_portfolio))
+        .route("/portfolio/{id}/balances", axum::routing::post(pages::add_balance))
+        .route("/portfolio/{id}/cell", axum::routing::get(pages::edit_cell))
+        .route("/portfolio/{id}/cell", axum::routing::put(pages::save_cell))
+        .route("/portfolio/{id}/date", axum::routing::get(pages::edit_date))
+        .route("/portfolio/{id}/date", axum::routing::put(pages::save_date))
+        .route("/portfolio/{id}/row", axum::routing::get(pages::get_row))
+        .route("/portfolio/{id}/rename-item", axum::routing::post(pages::save_item_name))
+        .route("/portfolio/{id}/move-item", axum::routing::post(pages::move_item))
+        .route("/portfolio/{id}/change-type", axum::routing::post(pages::change_item_type))
+        .route("/portfolio/{id}/delete-item", axum::routing::post(pages::delete_item))
         .nest_service("/static", ServeDir::new("src/static"))
         .fallback(pages::not_found)
         .with_state(state)

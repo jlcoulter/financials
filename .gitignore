@@ -1,4 +1,5 @@
 /target
+AGENTS.md
 *.db
 *.db-shm
 .db-wal
