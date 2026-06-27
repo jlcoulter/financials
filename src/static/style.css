@@ -47,6 +47,42 @@ body {
     background: var(--surface2);
 }
 
+.insights-portfolio-list {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+}
+
+.insights-portfolio-link {
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.95rem;
+}
+
+.insights-portfolio-link:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent);
+}
+
+.insights-portfolio-link.current {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.insights-chart-section {
+    margin-bottom: 2rem;
+}
+
+.insights-chart-section > div {
+    width: 100%;
+}
+
 .add-item-details {
     margin: 1rem 0;
 }
@@ -162,6 +198,13 @@ header {
     padding-bottom: 16px;
     border-bottom: 1px solid var(--border);
     margin-bottom: 24px;
+}
+
+.header-link {
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 600;
+    margin-right: auto;
 }
 
 form {

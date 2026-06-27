@@ -58,6 +58,8 @@ fn app(state: AppState) -> Router {
         .route("/login", axum::routing::get(auth::login))
         .route("/login", axum::routing::post(auth::login_post))
         .route("/dashboard", axum::routing::get(pages::dashboard))
+        .route("/insights", axum::routing::get(pages::insights))
+        .route("/insights/{id}", axum::routing::get(pages::insights_chart))
         .route("/logout", axum::routing::post(auth::logout_post))
         .route("/portfolios", axum::routing::get(pages::portfolios))
         .route("/portfolios", axum::routing::post(pages::create_portfolio))

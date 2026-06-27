@@ -818,14 +818,239 @@ pub async fn dashboard(State(state): State<AppState>, user: LoggedInUser) -> imp
                     h3 { "Portfolios" }
                     p { "View and manage your portfolios" }
                 }
-                div class="card" {
-                    h3 { "Activity" }
-                    p { "View your recent activity" }
+                a href="/insights" class="card" {
+                    h3 { "Insights" }
+                    p { "View your financial insights" }
                 }
             }
         },
         Some(&user),
     )
+}
+
+pub async fn insights(
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<maud::Markup, AppError> {
+    let portfolios = portfolio::list_portfolios(state.db(), user.0).await?;
+
+    // Build portfolio selector links
+    let portfolio_links: Vec<maud::Markup> = portfolios.iter().map(|(pid, pname)| {
+        maud::html! {
+            a href=(format!("/insights/{}", pid)) class="insights-portfolio-link" { (pname) }
+        }
+    }).collect();
+
+    Ok(layout(
+        "Insights",
+        maud::html! {
+            h2 { "Insights" }
+            div class="insights-portfolio-list" {
+                @for link in &portfolio_links {
+                    (link)
+                }
+            }
+        },
+        Some(&user),
+    ))
+}
+
+pub async fn insights_chart(
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    Path(portfolio_id): Path<Uuid>,
+) -> Result<maud::Markup, AppError> {
+    let portfolios = portfolio::list_portfolios(state.db(), user.0).await?;
+    let portfolio_name = portfolios.iter()
+        .find(|(pid, _)| pid == &portfolio_id)
+        .map(|(_, pname)| pname.clone())
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+
+    // Get unique dates sorted ascending
+    let mut dates: Vec<String> = logs
+        .iter()
+        .map(|l| l.log_date.format("%Y-%m-%d").to_string())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    dates.sort();
+
+    let mut item_names: Vec<String> = Vec::new();
+    let mut values: Vec<Vec<f64>> = Vec::new();
+
+    for item in &items {
+        let item_logs: Vec<_> = logs
+            .iter()
+            .filter(|l| l.item_id == item.item_id)
+            .collect();
+
+        let mut row = vec![0.0; dates.len()];
+        for log in &item_logs {
+            let date_str = log.log_date.format("%Y-%m-%d").to_string();
+            if let Some(idx) = dates.iter().position(|d| d == &date_str) {
+                let val = if item.item_type == "debt" {
+                    -(log.balance_value as f64) / 100.0
+                } else {
+                    log.balance_value as f64 / 100.0
+                };
+                row[idx] = val;
+            }
+        }
+
+        item_names.push(item.name.clone());
+        values.push(row);
+    }
+
+    // Build portfolio selector links
+    let portfolio_links: Vec<maud::Markup> = portfolios.iter().map(|(pid, pname)| {
+        let current = *pid == portfolio_id;
+        maud::html! {
+            a href=(format!("/insights/{}", pid))
+               class=(if current { "insights-portfolio-link current" } else { "insights-portfolio-link" }) { (pname) }
+        }
+    }).collect();
+
+    // Chart A: Cumulative Net Worth Trend (stacked area line)
+    use charming::{
+        component::{Axis, Legend, Title},
+        element::{AreaStyle, AxisType, Tooltip, Trigger},
+        series::Line,
+        theme::Theme,
+        Chart,
+    };
+    use charming::element::smoothness::Smoothness;
+    use charming::renderer::HtmlRenderer;
+    use charming::element::{AxisLabel, TextStyle};
+
+    let white_text = TextStyle::new().color("#ffffff");
+    let white_axis_label = AxisLabel::new().color("#ffffff");
+
+    let mut trend_chart = Chart::new()
+        .background_color("#0f172a")
+        .title(Title::new().text(format!("{} — Net Worth Trend", portfolio_name)).text_style(white_text.clone()))
+        .tooltip(Tooltip::new().trigger(Trigger::Axis))
+        .legend(Legend::new().data(item_names.clone()).text_style(white_text.clone()))
+        .x_axis(Axis::new().type_(AxisType::Category).data(dates.clone()).axis_label(white_axis_label.clone()))
+        .y_axis(Axis::new().type_(AxisType::Value).axis_label(white_axis_label.clone()));
+
+    for (i, name) in item_names.iter().enumerate() {
+        let series = Line::new()
+            .name(name.clone())
+            .stack("total")
+            .area_style(AreaStyle::new().opacity(0.3))
+            .smooth(Smoothness::Boolean(true))
+            .data(values[i].clone());
+        trend_chart = trend_chart.series(series);
+    }
+
+    let trend_html = HtmlRenderer::new("trend-chart", 900, 500)
+        .theme(Theme::Dark)
+        .render(&trend_chart)
+        .unwrap_or_else(|_| "<p>Trend chart rendering failed</p>".to_string());
+
+    // Chart B: Cash Flow (grouped bar — positive = income, negative = expenses)
+    // Compute per-date totals for inflows vs outflows
+    let mut inflow: Vec<f64> = vec![0.0; dates.len()];
+    let mut outflow: Vec<f64> = vec![0.0; dates.len()];
+    for (i, name) in item_names.iter().enumerate() {
+        let item = items.iter().find(|it| &it.name == name).unwrap();
+        for (j, &val) in values[i].iter().enumerate() {
+            if item.item_type == "debt" {
+                outflow[j] += val.abs();
+            } else {
+                inflow[j] += val;
+            }
+        }
+    }
+
+    use charming::series::Bar;
+    let mut flow_chart = Chart::new()
+        .background_color("#0f172a")
+        .title(Title::new().text(format!("{} — Cash Flow", portfolio_name)).text_style(white_text.clone()))
+        .tooltip(Tooltip::new().trigger(Trigger::Axis))
+        .legend(Legend::new().data(vec!["Income".to_string(), "Expenses".to_string()]).text_style(white_text.clone()))
+        .x_axis(Axis::new().type_(AxisType::Category).data(dates.clone()).axis_label(white_axis_label.clone()))
+        .y_axis(Axis::new().type_(AxisType::Value).axis_label(white_axis_label.clone()));
+
+    flow_chart = flow_chart
+        .series(Bar::new().name("Income").data(inflow))
+        .series(Bar::new().name("Expenses").data(outflow));
+
+    let flow_html = HtmlRenderer::new("flow-chart", 900, 400)
+        .theme(Theme::Dark)
+        .render(&flow_chart)
+        .unwrap_or_else(|_| "<p>Flow chart rendering failed</p>".to_string());
+
+    // Chart C: Asset Allocation (donut pie)
+    // Compute latest values per item (use last non-zero, or last date's value)
+    let mut pie_data: Vec<(String, f64)> = Vec::new();
+    for (i, name) in item_names.iter().enumerate() {
+        let latest = values[i].iter().rev().find(|&&v| v != 0.0).copied().unwrap_or(0.0);
+        if latest > 0.0 {
+            pie_data.push((name.clone(), latest));
+        }
+    }
+
+    use charming::datatype::DataPoint;
+    use charming::series::Pie;
+
+    let pie_series_data: Vec<DataPoint> = pie_data.iter()
+        .map(|(name, val)| DataPoint::Item(charming::datatype::DataPointItem::new(*val).name(name.clone())))
+        .collect();
+
+    let pie_chart = Chart::new()
+        .background_color("#0f172a")
+        .title(Title::new().text(format!("{} — Asset Allocation", portfolio_name)).text_style(white_text.clone()))
+        .tooltip(Tooltip::new().trigger(Trigger::Item))
+        .legend(Legend::new().data(pie_data.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>())
+            .text_style(white_text.clone())
+            .bottom("0%")
+            .left("center"))
+        .series(Pie::new()
+            .name("Allocation")
+            .radius(vec!["40%", "70%"])
+            .data(pie_series_data));
+
+    let pie_html = HtmlRenderer::new("pie-chart", 900, 500)
+        .theme(Theme::Dark)
+        .render(&pie_chart)
+        .unwrap_or_else(|_| "<p>Pie chart rendering failed</p>".to_string());
+
+    // Replace hardcoded "chart" ids in charming HTML with unique ids
+    // (charming hardcodes id="chart" for every render)
+    fn make_chart_id(html: &str, new_id: &str) -> String {
+        html.replace("id=\"chart\"", &format!("id=\"{}\"", new_id))
+            .replace("getElementById('chart')", &format!("getElementById('{}')", new_id))
+    }
+
+    let trend_html = make_chart_id(&trend_html, "trend-chart");
+    let flow_html = make_chart_id(&flow_html, "flow-chart");
+    let pie_html = make_chart_id(&pie_html, "pie-chart");
+
+    Ok(layout(
+        "Insights",
+        maud::html! {
+            h2 { "Insights" }
+            div class="insights-portfolio-list" {
+                @for link in &portfolio_links {
+                    (link)
+                }
+            }
+            div class="insights-chart-section" {
+                (maud::PreEscaped(trend_html))
+            }
+            div class="insights-chart-section" {
+                (maud::PreEscaped(flow_html))
+            }
+            div class="insights-chart-section" {
+                (maud::PreEscaped(pie_html))
+            }
+        },
+        Some(&user),
+    ))
 }
 
 pub async fn time(State(_state): State<AppState>) -> impl IntoResponse {

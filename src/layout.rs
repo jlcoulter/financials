@@ -14,6 +14,7 @@ pub fn layout(title: &str, content: maud::Markup, username: Option<&LoggedInUser
             body {
                 header {
                     @if let Some(_name) = username {
+                        a href="/dashboard" class="header-link" { "Dashboard" }
                         span { "Hello!"  }
                         form action = "/logout"
                         method = "post" {
