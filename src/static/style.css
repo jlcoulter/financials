@@ -14,9 +14,7 @@
 
 body {
     font-family: sans-serif;
-    max-width: 1200px;
-    margin: 40px auto;
-    padding: 0 20px;
+    margin: 40px 20px;
     background: var(--bg);
     color: var(--text);
 }
@@ -155,7 +153,6 @@ a.card:hover {
 	flex-direction: column;
 	gap: 0.5rem;
 	width: 100%;
-	max-width: 1200px;
 	margin: 0 auto;
 }
 
@@ -217,11 +214,17 @@ padding: 0.5rem 0.75rem;
 text-align: right;
 border-bottom: 1px solid #64748b;
 border-left: 1px solid #64748b;
-white-space: nowrap;
+overflow: hidden;
+text-overflow: ellipsis;
 }
 
 th:first-child, td:first-child {
 	border-left: none;
+	width: 6rem;
+}
+
+th:last-child, td:last-child {
+	width: 7rem;
 }
 
 th {
@@ -269,7 +272,6 @@ th.editable:hover {
 
 td.date-cell {
     cursor: pointer;
-    min-width: 6rem;
 }
 
 .date-error {
