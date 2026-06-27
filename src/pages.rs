@@ -387,10 +387,7 @@ pub async fn edit_cell(
     let target_sel = format!("#{}", cell_id);
 
     Ok(maud::html! {
-        td id=(cell_id) class="editable" tabindex="0"
-           hx-get=(format!("/portfolio/{}/cell?item_id={}&date={}", portfolio_id, item_id, date))
-           hx-target=(format!("#{}", cell_id))
-           hx-swap="outerHTML" {
+        td id=(cell_id) class="editable" tabindex="0" {
             form class="cell-edit-form"
                   hx-put=(format!("/portfolio/{}/cell", portfolio_id))
                   hx-target=(format!("#{}", cell_id))
@@ -401,8 +398,8 @@ pub async fn edit_cell(
                 input type="number" step="0.01" name="value"
                        value=(display_val)
                        class="cell-edit-input"
-                       hx-on--blur="this.closest('form').requestSubmit()"
-                       hx-on--keydown=(format!("if(event.key==='Enter'){{event.preventDefault();this.closest('form').requestSubmit()}}else if(event.key==='Escape'){{event.preventDefault();htmx.ajax('GET','{}',{{target:'{}',swap:'outerHTML'}})}}", cancel_url, target_sel))
+                       onblur="this.closest('form').requestSubmit()"
+                       onkeydown=(format!("if(event.key==='Enter'){{event.preventDefault();this.closest('form').requestSubmit()}}else if(event.key==='Escape'){{event.preventDefault();htmx.ajax('GET','{}',{{target:'{}',swap:'outerHTML'}})}}", cancel_url, target_sel))
                        autofocus {}
             }
         }
@@ -488,8 +485,8 @@ pub async fn edit_date(
                        value=(date)
                        placeholder="YYYY-MM-DD"
                        class="cell-edit-input date-input"
-                       hx-on--blur="this.closest('form').requestSubmit()"
-                       hx-on--keydown=(format!("if(event.key==='Enter'){{event.preventDefault();this.closest('form').requestSubmit()}}else if(event.key==='Escape'){{event.preventDefault();htmx.ajax('GET','/portfolio/{}/row?date={}',{{target:'{}',swap:'outerHTML'}})}}", portfolio_id, date, format!("#row-{}", date)))
+                       onblur="this.closest('form').requestSubmit()"
+                       onkeydown=(format!("if(event.key==='Enter'){{event.preventDefault();this.closest('form').requestSubmit()}}else if(event.key==='Escape'){{event.preventDefault();htmx.ajax('GET','/portfolio/{}/row?date={}',{{target:'{}',swap:'outerHTML'}})}}", portfolio_id, date, format!("#row-{}", date)))
                        autofocus {}
             }
         }
@@ -678,10 +675,7 @@ pub async fn edit_item_name(
     let target_sel = format!("#{}", th_id);
 
     Ok(maud::html! {
-        th id=(th_id) class="editable" tabindex="0"
-           hx-get=(cancel_url)
-           hx-target=(target_sel)
-           hx-swap="outerHTML" {
+        th id=(th_id) class="editable" tabindex="0" {
             form class="cell-edit-form"
                   hx-put=(format!("/portfolio/{}/rename-item", portfolio_id))
                   hx-target=(format!("#{}", th_id))
@@ -691,8 +685,8 @@ pub async fn edit_item_name(
                 input type="text" name="name"
                        value=(item.name)
                        class="cell-edit-input"
-                       hx-on--blur="this.closest('form').requestSubmit()"
-                       hx-on--keydown=(format!("if(event.key==='Enter'){{event.preventDefault();this.closest('form').requestSubmit()}}else if(event.key==='Escape'){{event.preventDefault();htmx.ajax('GET','{}',{{target:'{}',swap:'outerHTML'}})}}", cancel_url, target_sel))
+                       onblur="this.closest('form').requestSubmit()"
+                       onkeydown=(format!("if(event.key==='Enter'){{event.preventDefault();this.closest('form').requestSubmit()}}else if(event.key==='Escape'){{event.preventDefault();htmx.ajax('GET','{}',{{target:'{}',swap:'outerHTML'}})}}", cancel_url, target_sel))
                        autofocus {}
             }
         }
