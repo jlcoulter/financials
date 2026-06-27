@@ -53,10 +53,7 @@ pub async fn get_user_by_username(
 
 const SQLITE_CONSTRAINT_UNIQUE: &str = "2067";
 
-pub async fn get_username_by_id(
-    pool: &SqlitePool,
-    user_id: Uuid,
-) -> Result<String, AppError> {
+pub async fn get_username_by_id(pool: &SqlitePool, user_id: Uuid) -> Result<String, AppError> {
     let row = sqlx::query("SELECT username FROM users WHERE user_id = ?")
         .bind(user_id.to_string())
         .fetch_one(pool)

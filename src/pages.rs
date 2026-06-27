@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::cookies::LoggedInUser;
 use crate::error::AppError;
 use crate::layout::layout;
-use crate::models::portfolio::{self, WealthItem, BalanceLog};
+use crate::models::portfolio::{self, BalanceLog, WealthItem};
 use crate::models::user;
 use crate::utils;
 use axum::extract::{Path, State};
@@ -106,10 +106,15 @@ pub async fn rename_portfolio(
 ) -> Result<axum::response::Redirect, AppError> {
     portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
     if form.name.trim().is_empty() {
-        return Err(AppError::BadRequest("Portfolio name cannot be empty".into()));
+        return Err(AppError::BadRequest(
+            "Portfolio name cannot be empty".into(),
+        ));
     }
     portfolio::rename_portfolio(state.db(), portfolio_id, form.name.trim()).await?;
-    Ok(axum::response::Redirect::to(&format!("/portfolio/{}", portfolio_id)))
+    Ok(axum::response::Redirect::to(&format!(
+        "/portfolio/{}",
+        portfolio_id
+    )))
 }
 
 #[derive(serde::Deserialize)]
@@ -386,9 +391,15 @@ pub async fn add_balance(
         })
         .collect();
 
-    let total: i64 = values.iter().enumerate()
+    let total: i64 = values
+        .iter()
+        .enumerate()
         .filter_map(|(i, v)| match v {
-            Some(val) => Some(if items[i].item_type == "debt" { -*val } else { *val }),
+            Some(val) => Some(if items[i].item_type == "debt" {
+                -*val
+            } else {
+                *val
+            }),
             None => None,
         })
         .sum();
@@ -452,7 +463,8 @@ pub async fn edit_cell(
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
 
     let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
-    let current_cents = logs.iter()
+    let current_cents = logs
+        .iter()
         .find(|l| l.item_id == item_id && l.log_date == date)
         .map(|l| l.balance_value);
 
@@ -465,7 +477,10 @@ pub async fn edit_cell(
         })
         .unwrap_or_default();
 
-    let cancel_url = format!("/portfolio/{}/cell?item_id={}&date={}", portfolio_id, item_id, date);
+    let cancel_url = format!(
+        "/portfolio/{}/cell?item_id={}&date={}",
+        portfolio_id, item_id, date
+    );
     let target_sel = format!("#{}", cell_id);
 
     Ok(maud::html! {
@@ -496,15 +511,18 @@ pub async fn save_cell(
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<maud::Markup, AppError> {
     portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    let item_id_str = form.get("item_id")
+    let item_id_str = form
+        .get("item_id")
         .ok_or_else(|| AppError::BadRequest("Missing item_id".into()))?;
     let item_id = Uuid::parse_str(item_id_str)
         .map_err(|_| AppError::BadRequest("Invalid item ID.".into()))?;
-    let date_str = form.get("date")
+    let date_str = form
+        .get("date")
         .ok_or_else(|| AppError::BadRequest("Missing date".into()))?;
     let date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
-    let value_str = form.get("value")
+    let value_str = form
+        .get("value")
         .ok_or_else(|| AppError::BadRequest("Missing value".into()))?;
 
     let cell_id = format!("cell-{}-{}", item_id, date);
@@ -520,8 +538,7 @@ pub async fn save_cell(
         });
     }
 
-    let cents = utils::parse_dollars(value_str)
-        .map_err(AppError::BadRequest)?;
+    let cents = utils::parse_dollars(value_str).map_err(AppError::BadRequest)?;
     portfolio::upsert_balance_log(state.db(), item_id, date, cents).await?;
 
     Ok(maud::html! {
@@ -603,9 +620,15 @@ fn render_data_row_inner(
     values: &[Option<i64>],
     error: Option<&str>,
 ) -> maud::Markup {
-    let total: i64 = values.iter().enumerate()
+    let total: i64 = values
+        .iter()
+        .enumerate()
         .filter_map(|(i, v)| match v {
-            Some(val) => Some(if items[i].item_type == "debt" { -*val } else { *val }),
+            Some(val) => Some(if items[i].item_type == "debt" {
+                -*val
+            } else {
+                *val
+            }),
             None => None,
         })
         .sum();
@@ -660,9 +683,11 @@ pub async fn save_date(
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<maud::Markup, AppError> {
     portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    let old_date_str = form.get("old_date")
+    let old_date_str = form
+        .get("old_date")
         .ok_or_else(|| AppError::BadRequest("Missing old_date".into()))?;
-    let new_date_str = form.get("new_date")
+    let new_date_str = form
+        .get("new_date")
         .ok_or_else(|| AppError::BadRequest("Missing new_date".into()))?;
     let old_date = NaiveDate::parse_from_str(old_date_str, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid old date format. Use YYYY-MM-DD.".into()))?;
@@ -674,45 +699,66 @@ pub async fn save_date(
     let new_date = match NaiveDate::parse_from_str(new_date_str, "%Y-%m-%d") {
         Ok(d) => d,
         Err(_) => {
-            let values: Vec<Option<i64>> = items.iter().map(|item| {
-                logs.iter()
-                    .find(|l| l.item_id == item.item_id && l.log_date == old_date)
-                    .map(|l| l.balance_value)
-            }).collect();
+            let values: Vec<Option<i64>> = items
+                .iter()
+                .map(|item| {
+                    logs.iter()
+                        .find(|l| l.item_id == item.item_id && l.log_date == old_date)
+                        .map(|l| l.balance_value)
+                })
+                .collect();
             return Ok(render_data_row_with_error(
-                portfolio_id, &items, old_date, &values,
+                portfolio_id,
+                &items,
+                old_date,
+                &values,
                 "Invalid date format. Use YYYY-MM-DD.",
             ));
         }
     };
 
     if old_date == new_date {
-        let values: Vec<Option<i64>> = items.iter().map(|item| {
-            logs.iter()
-                .find(|l| l.item_id == item.item_id && l.log_date == old_date)
-                .map(|l| l.balance_value)
-        }).collect();
+        let values: Vec<Option<i64>> = items
+            .iter()
+            .map(|item| {
+                logs.iter()
+                    .find(|l| l.item_id == item.item_id && l.log_date == old_date)
+                    .map(|l| l.balance_value)
+            })
+            .collect();
         return Ok(render_data_row(portfolio_id, &items, old_date, &values));
     }
 
     match portfolio::rename_date(state.db(), portfolio_id, old_date, new_date).await {
         Ok(_) => {}
         Err(AppError::BadRequest(msg)) => {
-            let values: Vec<Option<i64>> = items.iter().map(|item| {
-                logs.iter()
-                    .find(|l| l.item_id == item.item_id && l.log_date == old_date)
-                    .map(|l| l.balance_value)
-            }).collect();
-            return Ok(render_data_row_with_error(portfolio_id, &items, old_date, &values, &msg));
+            let values: Vec<Option<i64>> = items
+                .iter()
+                .map(|item| {
+                    logs.iter()
+                        .find(|l| l.item_id == item.item_id && l.log_date == old_date)
+                        .map(|l| l.balance_value)
+                })
+                .collect();
+            return Ok(render_data_row_with_error(
+                portfolio_id,
+                &items,
+                old_date,
+                &values,
+                &msg,
+            ));
         }
         Err(e) => return Err(e),
     }
 
-    let values: Vec<Option<i64>> = items.iter().map(|item| {
-        logs.iter()
-            .find(|l| l.item_id == item.item_id && l.log_date == new_date)
-            .map(|l| l.balance_value)
-    }).collect();
+    let values: Vec<Option<i64>> = items
+        .iter()
+        .map(|item| {
+            logs.iter()
+                .find(|l| l.item_id == item.item_id && l.log_date == new_date)
+                .map(|l| l.balance_value)
+        })
+        .collect();
 
     Ok(render_data_row(portfolio_id, &items, new_date, &values))
 }
@@ -730,11 +776,14 @@ pub async fn get_row(
 
     let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
     let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
-    let values: Vec<Option<i64>> = items.iter().map(|item| {
-        logs.iter()
-            .find(|l| l.item_id == item.item_id && l.log_date == date)
-            .map(|l| l.balance_value)
-    }).collect();
+    let values: Vec<Option<i64>> = items
+        .iter()
+        .map(|item| {
+            logs.iter()
+                .find(|l| l.item_id == item.item_id && l.log_date == date)
+                .map(|l| l.balance_value)
+        })
+        .collect();
 
     Ok(render_data_row(portfolio_id, &items, date, &values))
 }
@@ -746,10 +795,12 @@ pub async fn save_item_name(
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<axum::response::Redirect, AppError> {
     portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    let item_id_str = form.get("item_id")
+    let item_id_str = form
+        .get("item_id")
         .ok_or_else(|| AppError::BadRequest("Missing item_id".into()))?;
     let item_id = Uuid::parse_str(item_id_str)?;
-    let name = form.get("name")
+    let name = form
+        .get("name")
         .ok_or_else(|| AppError::BadRequest("Missing name".into()))?;
 
     if name.trim().is_empty() {
@@ -757,7 +808,10 @@ pub async fn save_item_name(
     }
 
     portfolio::rename_wealth_item(state.db(), item_id, name.trim()).await?;
-    Ok(axum::response::Redirect::to(&format!("/portfolio/{}", portfolio_id)))
+    Ok(axum::response::Redirect::to(&format!(
+        "/portfolio/{}",
+        portfolio_id
+    )))
 }
 
 #[derive(serde::Deserialize)]
@@ -783,7 +837,10 @@ pub async fn change_item_type(
         return Err(AppError::BadRequest("Invalid item type".into()));
     }
     portfolio::change_wealth_item_type(state.db(), form.item_id, &form.item_type).await?;
-    Ok(axum::response::Redirect::to(&format!("/portfolio/{}", portfolio_id)))
+    Ok(axum::response::Redirect::to(&format!(
+        "/portfolio/{}",
+        portfolio_id
+    )))
 }
 
 pub async fn delete_item(
@@ -794,11 +851,16 @@ pub async fn delete_item(
 ) -> Result<axum::response::Redirect, AppError> {
     portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
     portfolio::delete_wealth_item(state.db(), form.item_id).await?;
-    Ok(axum::response::Redirect::to(&format!("/portfolio/{}", portfolio_id)))
+    Ok(axum::response::Redirect::to(&format!(
+        "/portfolio/{}",
+        portfolio_id
+    )))
 }
 
 pub async fn dashboard(State(state): State<AppState>, user: LoggedInUser) -> impl IntoResponse {
-    let username = user::get_username_by_id(state.db(), user.0).await.unwrap_or_else(|_| "User".to_string());
+    let username = user::get_username_by_id(state.db(), user.0)
+        .await
+        .unwrap_or_else(|_| "User".to_string());
     let hour = chrono::Local::now()
         .format("%H")
         .to_string()
@@ -835,11 +897,14 @@ pub async fn insights(
     let portfolios = portfolio::list_portfolios(state.db(), user.0).await?;
 
     // Build portfolio selector links
-    let portfolio_links: Vec<maud::Markup> = portfolios.iter().map(|(pid, pname)| {
-        maud::html! {
-            a href=(format!("/insights/{}", pid)) class="insights-portfolio-link" { (pname) }
-        }
-    }).collect();
+    let portfolio_links: Vec<maud::Markup> = portfolios
+        .iter()
+        .map(|(pid, pname)| {
+            maud::html! {
+                a href=(format!("/insights/{}", pid)) class="insights-portfolio-link" { (pname) }
+            }
+        })
+        .collect();
 
     Ok(layout(
         "Insights",
@@ -861,7 +926,8 @@ pub async fn insights_chart(
     Path(portfolio_id): Path<Uuid>,
 ) -> Result<maud::Markup, AppError> {
     let portfolios = portfolio::list_portfolios(state.db(), user.0).await?;
-    let portfolio_name = portfolios.iter()
+    let portfolio_name = portfolios
+        .iter()
         .find(|(pid, _)| pid == &portfolio_id)
         .map(|(_, pname)| pname.clone())
         .unwrap_or_else(|| "Unknown".to_string());
@@ -882,10 +948,7 @@ pub async fn insights_chart(
     let mut values: Vec<Vec<f64>> = Vec::new();
 
     for item in &items {
-        let item_logs: Vec<_> = logs
-            .iter()
-            .filter(|l| l.item_id == item.item_id)
-            .collect();
+        let item_logs: Vec<_> = logs.iter().filter(|l| l.item_id == item.item_id).collect();
 
         let mut row = vec![0.0; dates.len()];
         for log in &item_logs {
@@ -914,27 +977,44 @@ pub async fn insights_chart(
     }).collect();
 
     // Chart A: Cumulative Net Worth Trend (stacked area line)
+    use charming::element::smoothness::Smoothness;
+    use charming::element::{AxisLabel, TextStyle};
+    use charming::renderer::HtmlRenderer;
     use charming::{
+        Chart,
         component::{Axis, Legend, Title},
         element::{AreaStyle, AxisType, Tooltip, Trigger},
         series::Line,
         theme::Theme,
-        Chart,
     };
-    use charming::element::smoothness::Smoothness;
-    use charming::renderer::HtmlRenderer;
-    use charming::element::{AxisLabel, TextStyle};
 
     let white_text = TextStyle::new().color("#ffffff");
     let white_axis_label = AxisLabel::new().color("#ffffff");
 
     let mut trend_chart = Chart::new()
         .background_color("#0f172a")
-        .title(Title::new().text(format!("{} — Net Worth Trend", portfolio_name)).text_style(white_text.clone()))
+        .title(
+            Title::new()
+                .text(format!("{} — Net Worth Trend", portfolio_name))
+                .text_style(white_text.clone()),
+        )
         .tooltip(Tooltip::new().trigger(Trigger::Axis))
-        .legend(Legend::new().data(item_names.clone()).text_style(white_text.clone()))
-        .x_axis(Axis::new().type_(AxisType::Category).data(dates.clone()).axis_label(white_axis_label.clone()))
-        .y_axis(Axis::new().type_(AxisType::Value).axis_label(white_axis_label.clone()));
+        .legend(
+            Legend::new()
+                .data(item_names.clone())
+                .text_style(white_text.clone()),
+        )
+        .x_axis(
+            Axis::new()
+                .type_(AxisType::Category)
+                .data(dates.clone())
+                .axis_label(white_axis_label.clone()),
+        )
+        .y_axis(
+            Axis::new()
+                .type_(AxisType::Value)
+                .axis_label(white_axis_label.clone()),
+        );
 
     for (i, name) in item_names.iter().enumerate() {
         let series = Line::new()
@@ -969,11 +1049,28 @@ pub async fn insights_chart(
     use charming::series::Bar;
     let mut flow_chart = Chart::new()
         .background_color("#0f172a")
-        .title(Title::new().text(format!("{} — Cash Flow", portfolio_name)).text_style(white_text.clone()))
+        .title(
+            Title::new()
+                .text(format!("{} — Cash Flow", portfolio_name))
+                .text_style(white_text.clone()),
+        )
         .tooltip(Tooltip::new().trigger(Trigger::Axis))
-        .legend(Legend::new().data(vec!["Income".to_string(), "Expenses".to_string()]).text_style(white_text.clone()))
-        .x_axis(Axis::new().type_(AxisType::Category).data(dates.clone()).axis_label(white_axis_label.clone()))
-        .y_axis(Axis::new().type_(AxisType::Value).axis_label(white_axis_label.clone()));
+        .legend(
+            Legend::new()
+                .data(vec!["Income".to_string(), "Expenses".to_string()])
+                .text_style(white_text.clone()),
+        )
+        .x_axis(
+            Axis::new()
+                .type_(AxisType::Category)
+                .data(dates.clone())
+                .axis_label(white_axis_label.clone()),
+        )
+        .y_axis(
+            Axis::new()
+                .type_(AxisType::Value)
+                .axis_label(white_axis_label.clone()),
+        );
 
     flow_chart = flow_chart
         .series(Bar::new().name("Income").data(inflow))
@@ -988,7 +1085,12 @@ pub async fn insights_chart(
     // Compute latest values per item (use last non-zero, or last date's value)
     let mut pie_data: Vec<(String, f64)> = Vec::new();
     for (i, name) in item_names.iter().enumerate() {
-        let latest = values[i].iter().rev().find(|&&v| v != 0.0).copied().unwrap_or(0.0);
+        let latest = values[i]
+            .iter()
+            .rev()
+            .find(|&&v| v != 0.0)
+            .copied()
+            .unwrap_or(0.0);
         if latest > 0.0 {
             pie_data.push((name.clone(), latest));
         }
@@ -997,22 +1099,34 @@ pub async fn insights_chart(
     use charming::datatype::DataPoint;
     use charming::series::Pie;
 
-    let pie_series_data: Vec<DataPoint> = pie_data.iter()
-        .map(|(name, val)| DataPoint::Item(charming::datatype::DataPointItem::new(*val).name(name.clone())))
+    let pie_series_data: Vec<DataPoint> = pie_data
+        .iter()
+        .map(|(name, val)| {
+            DataPoint::Item(charming::datatype::DataPointItem::new(*val).name(name.clone()))
+        })
         .collect();
 
     let pie_chart = Chart::new()
         .background_color("#0f172a")
-        .title(Title::new().text(format!("{} — Asset Allocation", portfolio_name)).text_style(white_text.clone()))
+        .title(
+            Title::new()
+                .text(format!("{} — Asset Allocation", portfolio_name))
+                .text_style(white_text.clone()),
+        )
         .tooltip(Tooltip::new().trigger(Trigger::Item))
-        .legend(Legend::new().data(pie_data.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>())
-            .text_style(white_text.clone())
-            .bottom("0%")
-            .left("center"))
-        .series(Pie::new()
-            .name("Allocation")
-            .radius(vec!["40%", "70%"])
-            .data(pie_series_data));
+        .legend(
+            Legend::new()
+                .data(pie_data.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>())
+                .text_style(white_text.clone())
+                .bottom("0%")
+                .left("center"),
+        )
+        .series(
+            Pie::new()
+                .name("Allocation")
+                .radius(vec!["40%", "70%"])
+                .data(pie_series_data),
+        );
 
     let pie_html = HtmlRenderer::new("pie-chart", 900, 500)
         .theme(Theme::Dark)
@@ -1023,7 +1137,10 @@ pub async fn insights_chart(
     // (charming hardcodes id="chart" for every render)
     fn make_chart_id(html: &str, new_id: &str) -> String {
         html.replace("id=\"chart\"", &format!("id=\"{}\"", new_id))
-            .replace("getElementById('chart')", &format!("getElementById('{}')", new_id))
+            .replace(
+                "getElementById('chart')",
+                &format!("getElementById('{}')", new_id),
+            )
     }
 
     let trend_html = make_chart_id(&trend_html, "trend-chart");
