@@ -161,10 +161,18 @@ pub async fn portfolio(
             @if items.is_empty() {
                 p { "No wealth items yet. Add one to start tracking." }
             }
-                @else {
-                ul {
+            @else {
+                div class="item-cards" {
                     @for item in &items {
-                        li { (item.name) " - " (item.item_type) }
+                        @let type_class = match item.item_type.as_str() {
+                            "debt" => "item-card--debt",
+                            "investment" => "item-card--investment",
+                            _ => "item-card--asset",
+                        };
+                        div class=(format!("item-card {}", type_class)) {
+                            span class="item-card__name" { (item.name) }
+                            span class="item-card__type" { (item.item_type) }
+                        }
                     }
                 }
             }
@@ -175,7 +183,12 @@ pub async fn portfolio(
                             tr {
                                 th { "Date" }
                                 @for item in &items {
-                                    th id=(format!("th-{}", item.item_id)) class="editable"
+                                    @let type_class = match item.item_type.as_str() {
+                                        "debt" => "th--debt",
+                                        "investment" => "th--investment",
+                                        _ => "th--asset",
+                                    };
+                                    th id=(format!("th-{}", item.item_id)) class=(format!("editable {}", type_class))
                                        tabindex="0"
                                        hx-get=(format!("/portfolio/{}/rename-item?item_id={}", portfolio_id, item.item_id))
                                        hx-target=(format!("#th-{}", item.item_id))
@@ -670,12 +683,17 @@ pub async fn edit_item_name(
     let item = items.iter().find(|i| i.item_id == item_id)
         .ok_or_else(|| AppError::BadRequest("Item not found".into()))?;
 
+    let type_class = match item.item_type.as_str() {
+        "debt" => "th--debt",
+        "investment" => "th--investment",
+        _ => "th--asset",
+    };
     let th_id = format!("th-{}", item_id);
     let cancel_url = format!("/portfolio/{}/rename-item?item_id={}", portfolio_id, item_id);
     let target_sel = format!("#{}", th_id);
 
     Ok(maud::html! {
-        th id=(th_id) class="editable" tabindex="0" {
+        th id=(th_id) class=(format!("editable {}", type_class)) tabindex="0" {
             form class="cell-edit-form"
                   hx-put=(format!("/portfolio/{}/rename-item", portfolio_id))
                   hx-target=(format!("#{}", th_id))
@@ -712,10 +730,19 @@ pub async fn save_item_name(
 
     portfolio::rename_wealth_item(state.db(), item_id, name.trim()).await?;
 
+    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+    let item = items.iter().find(|i| i.item_id == item_id)
+        .ok_or_else(|| AppError::BadRequest("Item not found".into()))?;
+    let type_class = match item.item_type.as_str() {
+        "debt" => "th--debt",
+        "investment" => "th--investment",
+        _ => "th--asset",
+    };
+
     let th_id = format!("th-{}", item_id);
 
     Ok(maud::html! {
-        th id=(th_id) class="editable" tabindex="0"
+        th id=(th_id) class=(format!("editable {}", type_class)) tabindex="0"
            hx-get=(format!("/portfolio/{}/rename-item?item_id={}", portfolio_id, item_id))
            hx-target=(format!("#{}", th_id))
            hx-swap="outerHTML" {

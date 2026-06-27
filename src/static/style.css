@@ -337,4 +337,57 @@ th .cell-edit-input {
     font-size: 0.8rem;
 }
 
+/* Item cards */
+.item-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 1rem 0;
+}
+
+.item-card {
+    display: flex;
+    flex-direction: column;
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+}
+
+.item-card__name {
+    font-weight: 600;
+}
+
+.item-card__type {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.8;
+}
+
+.item-card--asset {
+    border-left: 4px solid #22c55e;
+}
+
+.item-card--investment {
+    border-left: 4px solid #10b981;
+}
+
+.item-card--debt {
+    border-left: 4px solid #ef4444;
+}
+
+/* Colored table headers */
+th.th--asset {
+    border-bottom: 3px solid #22c55e;
+}
+
+th.th--investment {
+    border-bottom: 3px solid #10b981;
+}
+
+th.th--debt {
+    border-bottom: 3px solid #ef4444;
+}
+
 
