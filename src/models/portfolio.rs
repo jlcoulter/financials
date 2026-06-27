@@ -74,7 +74,9 @@ pub async fn move_wealth_item(
     direction: &str,
 ) -> Result<(), AppError> {
     let items = list_wealth_items(pool, portfolio_id).await?;
-    let idx = items.iter().position(|i| i.item_id == item_id)
+    let idx = items
+        .iter()
+        .position(|i| i.item_id == item_id)
         .ok_or_else(|| AppError::BadRequest("Item not found".into()))?;
 
     let swap_idx = match direction {
@@ -88,19 +90,20 @@ pub async fn move_wealth_item(
 
     // Swap positions
     sqlx::query("UPDATE wealth_items SET position = ? WHERE item_id = ?")
-        .bind(b.position).bind(a.item_id.to_string())
-        .execute(pool).await?;
+        .bind(b.position)
+        .bind(a.item_id.to_string())
+        .execute(pool)
+        .await?;
     sqlx::query("UPDATE wealth_items SET position = ? WHERE item_id = ?")
-        .bind(a.position).bind(b.item_id.to_string())
-        .execute(pool).await?;
+        .bind(a.position)
+        .bind(b.item_id.to_string())
+        .execute(pool)
+        .await?;
 
     Ok(())
 }
 
-pub async fn delete_wealth_item(
-    pool: &SqlitePool,
-    item_id: Uuid,
-) -> Result<(), AppError> {
+pub async fn delete_wealth_item(pool: &SqlitePool, item_id: Uuid) -> Result<(), AppError> {
     let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
     sqlx::query("UPDATE wealth_items SET deleted_at = ? WHERE item_id = ?")
         .bind(now)
@@ -213,7 +216,7 @@ pub async fn rename_date(
         "UPDATE balance_logs SET log_date = ? \
          WHERE log_date = ? AND item_id IN (\
            SELECT item_id FROM wealth_items WHERE portfolio_id = ? AND deleted_at IS NULL\
-         ) AND deleted_at IS NULL"
+         ) AND deleted_at IS NULL",
     )
     .bind(new_date.to_string())
     .bind(old_date.to_string())
@@ -223,7 +226,9 @@ pub async fn rename_date(
 
     match result {
         Ok(r) => Ok(r.rows_affected() as usize),
-        Err(sqlx::Error::Database(ref db_err)) if crate::error::is_unique_constraint(db_err.as_ref()) => {
+        Err(sqlx::Error::Database(ref db_err))
+            if crate::error::is_unique_constraint(db_err.as_ref()) =>
+        {
             Err(AppError::BadRequest(format!(
                 "Date {} already has entries in this portfolio",
                 new_date

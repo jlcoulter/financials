@@ -64,18 +64,39 @@ fn app(state: AppState) -> Router {
         .route("/portfolios", axum::routing::get(pages::portfolios))
         .route("/portfolios", axum::routing::post(pages::create_portfolio))
         .route("/portfolio/{id}", axum::routing::get(pages::portfolio))
-        .route("/portfolio/{id}/items", axum::routing::post(pages::add_item))
-        .route("/portfolio/{id}/rename", axum::routing::post(pages::rename_portfolio))
-        .route("/portfolio/{id}/balances", axum::routing::post(pages::add_balance))
+        .route(
+            "/portfolio/{id}/items",
+            axum::routing::post(pages::add_item),
+        )
+        .route(
+            "/portfolio/{id}/rename",
+            axum::routing::post(pages::rename_portfolio),
+        )
+        .route(
+            "/portfolio/{id}/balances",
+            axum::routing::post(pages::add_balance),
+        )
         .route("/portfolio/{id}/cell", axum::routing::get(pages::edit_cell))
         .route("/portfolio/{id}/cell", axum::routing::put(pages::save_cell))
         .route("/portfolio/{id}/date", axum::routing::get(pages::edit_date))
         .route("/portfolio/{id}/date", axum::routing::put(pages::save_date))
         .route("/portfolio/{id}/row", axum::routing::get(pages::get_row))
-        .route("/portfolio/{id}/rename-item", axum::routing::post(pages::save_item_name))
-        .route("/portfolio/{id}/move-item", axum::routing::post(pages::move_item))
-        .route("/portfolio/{id}/change-type", axum::routing::post(pages::change_item_type))
-        .route("/portfolio/{id}/delete-item", axum::routing::post(pages::delete_item))
+        .route(
+            "/portfolio/{id}/rename-item",
+            axum::routing::post(pages::save_item_name),
+        )
+        .route(
+            "/portfolio/{id}/move-item",
+            axum::routing::post(pages::move_item),
+        )
+        .route(
+            "/portfolio/{id}/change-type",
+            axum::routing::post(pages::change_item_type),
+        )
+        .route(
+            "/portfolio/{id}/delete-item",
+            axum::routing::post(pages::delete_item),
+        )
         .nest_service("/static", ServeDir::new("src/static"))
         .fallback(pages::not_found)
         .with_state(state)
