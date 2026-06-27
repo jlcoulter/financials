@@ -192,8 +192,22 @@ pub async fn portfolio(
                             _ => "item-card--asset",
                         };
                         div class=(format!("item-card {}", type_class)) {
-                            span class="item-card__name" { (item.name) }
-                            span class="item-card__type" { (item.item_type) }
+                            form method="post" action=(format!("/portfolio/{}/rename-item", portfolio_id)) class="item-card__name-form" {
+                                input type="hidden" name="item_id" value=(item.item_id) {}
+                                input type="text" name="name" value=(item.name)
+                                       class="item-card__name-input"
+                                       onblur="this.closest('form').requestSubmit()"
+                                       onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('form').requestSubmit()}" {}
+                            }
+                            form method="post" action=(format!("/portfolio/{}/change-type", portfolio_id)) class="item-card__type-form" {
+                                input type="hidden" name="item_id" value=(item.item_id) {}
+                                select name="item_type" class="item-card__type" onchange="this.closest('form').requestSubmit()" {
+                                    option value="asset" selected[item.item_type == "asset"] { "Asset" }
+                                    option value="cash" selected[item.item_type == "cash"] { "Cash" }
+                                    option value="debt" selected[item.item_type == "debt"] { "Debt" }
+                                    option value="investment" selected[item.item_type == "investment"] { "Investment" }
+                                }
+                            }
                         }
                     }
                 }
@@ -211,11 +225,7 @@ pub async fn portfolio(
                                         "cash" => "th--cash",
                                         _ => "th--asset",
                                     };
-                                    th id=(format!("th-{}", item.item_id)) class=(format!("editable {}", type_class))
-                                       tabindex="0"
-                                       hx-get=(format!("/portfolio/{}/rename-item?item_id={}", portfolio_id, item.item_id))
-                                       hx-target=(format!("#th-{}", item.item_id))
-                                       hx-swap="outerHTML" {
+                                    th id=(format!("th-{}", item.item_id)) class=(format!("{}", type_class)) {
                                         (item.name)
                                         span class="col-arrows" {
                                             @if idx > 0 {
@@ -392,11 +402,6 @@ pub async fn add_balance(
 }
 
 // ── Inline cell editing (HTMX) ──
-
-#[derive(serde::Deserialize)]
-pub struct ItemQuery {
-    item_id: String,
-}
 
 #[derive(serde::Deserialize)]
 pub struct CellQuery {
@@ -705,54 +710,12 @@ pub async fn get_row(
     Ok(render_data_row(portfolio_id, &items, date, &values))
 }
 
-pub async fn edit_item_name(
-    Path(portfolio_id): Path<Uuid>,
-    State(state): State<AppState>,
-    user: LoggedInUser,
-    axum::extract::Query(query): axum::extract::Query<ItemQuery>,
-) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    let item_id = Uuid::parse_str(&query.item_id)?;
-
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
-    let item = items.iter().find(|i| i.item_id == item_id)
-        .ok_or_else(|| AppError::BadRequest("Item not found".into()))?;
-
-    let type_class = match item.item_type.as_str() {
-        "debt" => "th--debt",
-        "investment" => "th--investment",
-        "cash" => "th--cash",
-        _ => "th--asset",
-    };
-    let th_id = format!("th-{}", item_id);
-    let cancel_url = format!("/portfolio/{}/rename-item?item_id={}", portfolio_id, item_id);
-    let target_sel = format!("#{}", th_id);
-
-    Ok(maud::html! {
-        th id=(th_id) class=(format!("editable {}", type_class)) tabindex="0" {
-            form class="cell-edit-form"
-                  hx-put=(format!("/portfolio/{}/rename-item", portfolio_id))
-                  hx-target=(format!("#{}", th_id))
-                  hx-swap="outerHTML"
-                  hx-trigger="submit" {
-                input type="hidden" name="item_id" value=(item_id) {}
-                input type="text" name="name"
-                       value=(item.name)
-                       class="cell-edit-input"
-                       onblur="this.closest('form').requestSubmit()"
-                       onkeydown=(format!("if(event.key==='Enter'){{event.preventDefault();this.closest('form').requestSubmit()}}else if(event.key==='Escape'){{event.preventDefault();htmx.ajax('GET','{}',{{target:'{}',swap:'outerHTML'}})}}", cancel_url, target_sel))
-                       autofocus {}
-            }
-        }
-    })
-}
-
 pub async fn save_item_name(
     Path(portfolio_id): Path<Uuid>,
     State(state): State<AppState>,
     user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
-) -> Result<maud::Markup, AppError> {
+) -> Result<axum::response::Redirect, AppError> {
     portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
     let item_id_str = form.get("item_id")
         .ok_or_else(|| AppError::BadRequest("Missing item_id".into()))?;
@@ -765,27 +728,28 @@ pub async fn save_item_name(
     }
 
     portfolio::rename_wealth_item(state.db(), item_id, name.trim()).await?;
+    Ok(axum::response::Redirect::to(&format!("/portfolio/{}", portfolio_id)))
+}
 
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
-    let item = items.iter().find(|i| i.item_id == item_id)
-        .ok_or_else(|| AppError::BadRequest("Item not found".into()))?;
-    let type_class = match item.item_type.as_str() {
-        "debt" => "th--debt",
-        "investment" => "th--investment",
-        "cash" => "th--cash",
-        _ => "th--asset",
-    };
+#[derive(serde::Deserialize)]
+pub struct ChangeTypeForm {
+    pub item_id: Uuid,
+    pub item_type: String,
+}
 
-    let th_id = format!("th-{}", item_id);
-
-    Ok(maud::html! {
-        th id=(th_id) class=(format!("editable {}", type_class)) tabindex="0"
-           hx-get=(format!("/portfolio/{}/rename-item?item_id={}", portfolio_id, item_id))
-           hx-target=(format!("#{}", th_id))
-           hx-swap="outerHTML" {
-            (name.trim())
-        }
-    })
+pub async fn change_item_type(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<ChangeTypeForm>,
+) -> Result<axum::response::Redirect, AppError> {
+    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    let valid_types = ["asset", "cash", "debt", "investment"];
+    if !valid_types.contains(&form.item_type.as_str()) {
+        return Err(AppError::BadRequest("Invalid item type".into()));
+    }
+    portfolio::change_wealth_item_type(state.db(), form.item_id, &form.item_type).await?;
+    Ok(axum::response::Redirect::to(&format!("/portfolio/{}", portfolio_id)))
 }
 
 pub async fn dashboard(user: LoggedInUser) -> impl IntoResponse {

@@ -166,6 +166,19 @@ pub async fn rename_wealth_item(
     Ok(())
 }
 
+pub async fn change_wealth_item_type(
+    pool: &SqlitePool,
+    item_id: Uuid,
+    item_type: &str,
+) -> Result<(), AppError> {
+    sqlx::query("UPDATE wealth_items SET item_type = ? WHERE item_id = ?")
+        .bind(item_type)
+        .bind(item_id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Rename a date for all balance logs in a portfolio.
 /// Updates all logs on `old_date` to `new_date` for items belonging to this portfolio.
 /// Returns the number of rows updated, or a BadRequest error if the new date would
