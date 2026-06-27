@@ -3,6 +3,7 @@ use crate::cookies::LoggedInUser;
 use crate::error::AppError;
 use crate::layout::layout;
 use crate::models::portfolio::{self, WealthItem, BalanceLog};
+use crate::models::user;
 use crate::utils;
 use axum::extract::{Path, State};
 use axum::response::IntoResponse;
@@ -796,7 +797,8 @@ pub async fn delete_item(
     Ok(axum::response::Redirect::to(&format!("/portfolio/{}", portfolio_id)))
 }
 
-pub async fn dashboard(user: LoggedInUser) -> impl IntoResponse {
+pub async fn dashboard(State(state): State<AppState>, user: LoggedInUser) -> impl IntoResponse {
+    let username = user::get_username_by_id(state.db(), user.0).await.unwrap_or_else(|_| "User".to_string());
     let hour = chrono::Local::now()
         .format("%H")
         .to_string()
@@ -810,7 +812,7 @@ pub async fn dashboard(user: LoggedInUser) -> impl IntoResponse {
     layout(
         "Dashboard",
         maud::html! {
-            h2 { (greeting) ", " (user.0) }
+            h2 { (greeting) ", " (username) }
             div class="cards" {
                 a href="/portfolios" class="card" {
                     h3 { "Portfolios" }

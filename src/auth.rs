@@ -22,12 +22,14 @@ pub async fn login(State(_state): State<AppState>) -> impl IntoResponse {
     layout(
         "Login",
         maud::html! {
-            form action="/login" hx-post="/login" hx-target="#error-box" method="post" {
-                label { "Username" input type="text" name="username"; }
-                label { "Password" input type="password" name="password"; }
-                button type="submit" { "Login" }
+            div class="auth-form" {
+                form action="/login" hx-post="/login" hx-target="#error-box" method="post" {
+                    label { "Username" input type="text" name="username"; }
+                    label { "Password" input type="password" name="password"; }
+                    button type="submit" { "Login" }
+                }
+                div id="error-box" {}
             }
-            div id="error-box" {}
         },
         None,
     )
@@ -65,12 +67,14 @@ pub async fn signup(State(_state): State<AppState>) -> impl IntoResponse {
     layout(
         "Sign up",
         maud::html! {
-            form action="/signup" hx-post="/signup" hx-target="#error-box" method="post" {
-                label { "Username" input type="text" name="username"; }
-                label { "Password" input type="password" name="password"; }
-                button type="submit" { "Sign up" }
+            div class="auth-form" {
+                form action="/signup" hx-post="/signup" hx-target="#error-box" method="post" {
+                    label { "Username" input type="text" name="username"; }
+                    label { "Password" input type="password" name="password"; }
+                    button type="submit" { "Sign up" }
+                }
+                div id="error-box" {}
             }
-            div id="error-box" {}
         },
         None,
     )
