@@ -140,9 +140,9 @@ pub async fn portfolios(
     Ok(layout(
         "Portfolios",
         maud::html! {
-            details {
+            details class="add-item-details" {
                 summary { "+ New Portfolio" }
-                form method="post" action="/portfolios" {
+                form method="post" action="/portfolios" class="add-item-form" {
                     label { "Name"
                         input type="text" name="name" required {}
                     }
