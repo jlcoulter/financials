@@ -151,6 +151,7 @@ pub async fn portfolio(
             label {"Type"
         select name="item_type" {
             option value="asset" {"Asset"}
+            option value="cash" {"Cash"}
             option value="debt" {"Debt"}
             option value="investment" {"Investment"}
         }
@@ -167,6 +168,7 @@ pub async fn portfolio(
                         @let type_class = match item.item_type.as_str() {
                             "debt" => "item-card--debt",
                             "investment" => "item-card--investment",
+                            "cash" => "item-card--cash",
                             _ => "item-card--asset",
                         };
                         div class=(format!("item-card {}", type_class)) {
@@ -186,6 +188,7 @@ pub async fn portfolio(
                                     @let type_class = match item.item_type.as_str() {
                                         "debt" => "th--debt",
                                         "investment" => "th--investment",
+                                        "cash" => "th--cash",
                                         _ => "th--asset",
                                     };
                                     th id=(format!("th-{}", item.item_id)) class=(format!("editable {}", type_class))
@@ -686,6 +689,7 @@ pub async fn edit_item_name(
     let type_class = match item.item_type.as_str() {
         "debt" => "th--debt",
         "investment" => "th--investment",
+        "cash" => "th--cash",
         _ => "th--asset",
     };
     let th_id = format!("th-{}", item_id);
@@ -736,6 +740,7 @@ pub async fn save_item_name(
     let type_class = match item.item_type.as_str() {
         "debt" => "th--debt",
         "investment" => "th--investment",
+        "cash" => "th--cash",
         _ => "th--asset",
     };
 

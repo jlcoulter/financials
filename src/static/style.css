@@ -369,6 +369,10 @@ th .cell-edit-input {
     border-left: 4px solid #22c55e;
 }
 
+.item-card--cash {
+    border-left: 4px solid #eab308;
+}
+
 .item-card--investment {
     border-left: 4px solid #10b981;
 }
@@ -380,6 +384,10 @@ th .cell-edit-input {
 /* Colored table headers */
 th.th--asset {
     border-bottom: 3px solid #22c55e;
+}
+
+th.th--cash {
+    border-bottom: 3px solid #eab308;
 }
 
 th.th--investment {
