@@ -63,6 +63,7 @@ fn app(state: AppState) -> Router {
         .route("/portfolios", axum::routing::post(pages::create_portfolio))
         .route("/portfolio/{id}", axum::routing::get(pages::portfolio))
         .route("/portfolio/{id}/items", axum::routing::post(pages::add_item))
+        .route("/portfolio/{id}/rename", axum::routing::post(pages::rename_portfolio))
         .route("/portfolio/{id}/balances", axum::routing::post(pages::add_balance))
         .route("/portfolio/{id}/cell", axum::routing::get(pages::edit_cell))
         .route("/portfolio/{id}/cell", axum::routing::put(pages::save_cell))

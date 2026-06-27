@@ -19,6 +19,34 @@ body {
     color: var(--text);
 }
 
+.portfolio-name-form {
+    display: inline;
+    margin: 0;
+    padding: 0;
+}
+
+.portfolio-name-input {
+    font-size: 1.5rem;
+    font-weight: 700;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text);
+    padding: 2px 6px;
+    width: auto;
+}
+
+.portfolio-name-input:hover {
+    border-color: var(--border);
+    background: var(--surface2);
+}
+
+.portfolio-name-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--surface2);
+}
+
 header {
     display: flex;
     justify-content: space-between;

@@ -93,6 +93,25 @@ pub async fn add_item(
 }
 
 #[derive(serde::Deserialize)]
+pub struct RenamePortfolioForm {
+    pub name: String,
+}
+
+pub async fn rename_portfolio(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<RenamePortfolioForm>,
+) -> Result<axum::response::Redirect, AppError> {
+    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    if form.name.trim().is_empty() {
+        return Err(AppError::BadRequest("Portfolio name cannot be empty".into()));
+    }
+    portfolio::rename_portfolio(state.db(), portfolio_id, form.name.trim()).await?;
+    Ok(axum::response::Redirect::to(&format!("/portfolio/{}", portfolio_id)))
+}
+
+#[derive(serde::Deserialize)]
 pub struct MoveItemQuery {
     pub item_id: Uuid,
     pub direction: String,
@@ -160,7 +179,12 @@ pub async fn portfolio(
         &format!("portfolio - {}", name),
         maud::html! {
             a href="/portfolios" { "<- Back" }
-            h2 { (name) }
+            form method="post" action=(format!("/portfolio/{}/rename", portfolio_id)) class="portfolio-name-form" {
+                input type="text" name="name" value=(name)
+                       class="portfolio-name-input"
+                       onblur="this.closest('form').requestSubmit()"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('form').requestSubmit()}" {}
+            }
 
             details {
                 summary { "+ Add Wealth Item"}

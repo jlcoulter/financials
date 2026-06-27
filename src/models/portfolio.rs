@@ -264,3 +264,16 @@ pub async fn get_portfolio(
     let id = Uuid::parse_str(&row.0)?;
     Ok((id, row.1))
 }
+
+pub async fn rename_portfolio(
+    pool: &SqlitePool,
+    portfolio_id: Uuid,
+    name: &str,
+) -> Result<(), AppError> {
+    sqlx::query("UPDATE portfolios SET name = ? WHERE portfolio_id = ?")
+        .bind(name)
+        .bind(portfolio_id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
