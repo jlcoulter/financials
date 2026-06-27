@@ -218,7 +218,7 @@ pub async fn portfolio(
                         div class=(format!("item-card {}", type_class)) {
                             form method="post" action=(format!("/portfolio/{}/delete-item", portfolio_id)) class="item-card__delete-form" {
                                 input type="hidden" name="item_id" value=(item.item_id) {}
-                                button type="submit" class="item-card__delete" title="Delete item" { "×" }
+                                button type="submit" class="item-card__delete" title="Delete item" onclick="return confirm('Delete this item? All its data will be removed.')" { "×" }
                             }
                             form method="post" action=(format!("/portfolio/{}/rename-item", portfolio_id)) class="item-card__name-form" {
                                 input type="hidden" name="item_id" value=(item.item_id) {}
