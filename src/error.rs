@@ -16,6 +16,13 @@ impl From<sqlx::Error> for AppError {
     }
 }
 
+/// Check if a database error is a unique constraint violation.
+/// SQLite returns error code "2067" (SQLITE_CONSTRAINT_UNIQUE).
+pub fn is_unique_constraint(err: &dyn sqlx::error::DatabaseError) -> bool {
+    err.code().map(|c| c == "2067").unwrap_or(false)
+        || err.message().contains("UNIQUE constraint")
+}
+
 impl From<uuid::Error> for AppError {
     fn from(err: uuid::Error) -> Self {
         AppError::Internal(err.into())

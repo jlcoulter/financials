@@ -134,6 +134,40 @@ pub async fn rename_wealth_item(
     Ok(())
 }
 
+/// Rename a date for all balance logs in a portfolio.
+/// Updates all logs on `old_date` to `new_date` for items belonging to this portfolio.
+/// Returns the number of rows updated, or a BadRequest error if the new date would
+/// conflict with existing logs.
+pub async fn rename_date(
+    pool: &SqlitePool,
+    portfolio_id: Uuid,
+    old_date: NaiveDate,
+    new_date: NaiveDate,
+) -> Result<usize, AppError> {
+    let result = sqlx::query(
+        "UPDATE balance_logs SET log_date = ? \
+         WHERE log_date = ? AND item_id IN (\
+           SELECT item_id FROM wealth_items WHERE portfolio_id = ? AND deleted_at IS NULL\
+         ) AND deleted_at IS NULL"
+    )
+    .bind(new_date.to_string())
+    .bind(old_date.to_string())
+    .bind(portfolio_id.to_string())
+    .execute(pool)
+    .await;
+
+    match result {
+        Ok(r) => Ok(r.rows_affected() as usize),
+        Err(sqlx::Error::Database(ref db_err)) if crate::error::is_unique_constraint(db_err.as_ref()) => {
+            Err(AppError::BadRequest(format!(
+                "Date {} already has entries in this portfolio",
+                new_date
+            )))
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 pub async fn create_portfolio(
     pool: &SqlitePool,
     user_id: Uuid,
