@@ -47,6 +47,60 @@ body {
     background: var(--surface2);
 }
 
+.add-item-details {
+    margin: 1rem 0;
+}
+
+.add-item-details summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.add-item-form {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 25%;
+}
+
+.add-item-form label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+
+.add-item-form input,
+.add-item-form select {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.9rem;
+}
+
+.add-item-form button {
+    padding: 4px 14px;
+    font-size: 0.9rem;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.add-item-form button:hover {
+    background: var(--accent-hover);
+}
+
 header {
     display: flex;
     justify-content: space-between;
@@ -381,6 +435,15 @@ th .cell-edit-input {
     border-radius: 8px;
     border: 1px solid var(--border);
     background: var(--surface);
+    position: relative;
+}
+
+.item-card__delete-form {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    margin: 0;
+    padding: 0;
 }
 
 .item-card__name-input {
@@ -420,6 +483,22 @@ th .cell-edit-input {
     display: inline;
     margin: 0;
     padding: 0;
+}
+
+.item-card__delete {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    border-radius: 3px;
+}
+
+.item-card__delete:hover {
+    color: var(--red);
+    background: rgba(248, 113, 113, 0.15);
 }
 
 select.item-card__type {

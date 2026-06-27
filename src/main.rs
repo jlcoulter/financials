@@ -73,6 +73,7 @@ fn app(state: AppState) -> Router {
         .route("/portfolio/{id}/rename-item", axum::routing::post(pages::save_item_name))
         .route("/portfolio/{id}/move-item", axum::routing::post(pages::move_item))
         .route("/portfolio/{id}/change-type", axum::routing::post(pages::change_item_type))
+        .route("/portfolio/{id}/delete-item", axum::routing::post(pages::delete_item))
         .nest_service("/static", ServeDir::new("src/static"))
         .fallback(pages::not_found)
         .with_state(state)

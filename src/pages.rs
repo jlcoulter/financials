@@ -186,21 +186,21 @@ pub async fn portfolio(
                        onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('form').requestSubmit()}" {}
             }
 
-            details {
-                summary { "+ Add Wealth Item"}
-                form method="post" action=(format!("/portfolio/{}/items", portfolio_id)) {
+            details class="add-item-details" {
+                summary { "+ Add Wealth Item" }
+                form method="post" action=(format!("/portfolio/{}/items", portfolio_id)) class="add-item-form" {
                     label { "Name"
-                    input type="text" name="name" required {}
-            }
-            label {"Type"
-        select name="item_type" {
-            option value="asset" {"Asset"}
-            option value="cash" {"Cash"}
-            option value="debt" {"Debt"}
-            option value="investment" {"Investment"}
-        }
-        }
-            button type="submit" {"Add Item"}
+                        input type="text" name="name" required {}
+                    }
+                    label { "Type"
+                        select name="item_type" {
+                            option value="asset" { "Asset" }
+                            option value="cash" { "Cash" }
+                            option value="debt" { "Debt" }
+                            option value="investment" { "Investment" }
+                        }
+                    }
+                    button type="submit" { "Add Item" }
                 }
             }
             @if items.is_empty() {
@@ -216,6 +216,10 @@ pub async fn portfolio(
                             _ => "item-card--asset",
                         };
                         div class=(format!("item-card {}", type_class)) {
+                            form method="post" action=(format!("/portfolio/{}/delete-item", portfolio_id)) class="item-card__delete-form" {
+                                input type="hidden" name="item_id" value=(item.item_id) {}
+                                button type="submit" class="item-card__delete" title="Delete item" { "×" }
+                            }
                             form method="post" action=(format!("/portfolio/{}/rename-item", portfolio_id)) class="item-card__name-form" {
                                 input type="hidden" name="item_id" value=(item.item_id) {}
                                 input type="text" name="name" value=(item.name)
@@ -761,6 +765,11 @@ pub struct ChangeTypeForm {
     pub item_type: String,
 }
 
+#[derive(serde::Deserialize)]
+pub struct DeleteItemForm {
+    pub item_id: Uuid,
+}
+
 pub async fn change_item_type(
     Path(portfolio_id): Path<Uuid>,
     State(state): State<AppState>,
@@ -773,6 +782,17 @@ pub async fn change_item_type(
         return Err(AppError::BadRequest("Invalid item type".into()));
     }
     portfolio::change_wealth_item_type(state.db(), form.item_id, &form.item_type).await?;
+    Ok(axum::response::Redirect::to(&format!("/portfolio/{}", portfolio_id)))
+}
+
+pub async fn delete_item(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<DeleteItemForm>,
+) -> Result<axum::response::Redirect, AppError> {
+    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::delete_wealth_item(state.db(), form.item_id).await?;
     Ok(axum::response::Redirect::to(&format!("/portfolio/{}", portfolio_id)))
 }
 

@@ -48,13 +48,20 @@ pub async fn create_wealth_item(
     item_type: &str,
 ) -> Result<Uuid, AppError> {
     let id = Uuid::now_v7();
+    let max_pos: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(position), -1) FROM wealth_items WHERE portfolio_id = ? AND deleted_at IS NULL",
+    )
+    .bind(portfolio_id.to_string())
+    .fetch_one(pool)
+    .await?;
     sqlx::query(
-        "INSERT INTO wealth_items (item_id, portfolio_id, name, item_type) VALUES (?, ?, ?, ?)",
+        "INSERT INTO wealth_items (item_id, portfolio_id, name, item_type, position) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(id.to_string())
     .bind(portfolio_id.to_string())
     .bind(name)
     .bind(item_type)
+    .bind(max_pos + 1)
     .execute(pool)
     .await?;
     Ok(id)
@@ -87,6 +94,19 @@ pub async fn move_wealth_item(
         .bind(a.position).bind(b.item_id.to_string())
         .execute(pool).await?;
 
+    Ok(())
+}
+
+pub async fn delete_wealth_item(
+    pool: &SqlitePool,
+    item_id: Uuid,
+) -> Result<(), AppError> {
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    sqlx::query("UPDATE wealth_items SET deleted_at = ? WHERE item_id = ?")
+        .bind(now)
+        .bind(item_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
