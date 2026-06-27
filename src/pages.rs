@@ -335,6 +335,11 @@ pub async fn add_balance(
 // ── Inline cell editing (HTMX) ──
 
 #[derive(serde::Deserialize)]
+pub struct ItemQuery {
+    item_id: String,
+}
+
+#[derive(serde::Deserialize)]
 pub struct CellQuery {
     item_id: String,
     date: String,
@@ -439,7 +444,7 @@ pub async fn edit_item_name(
     Path(portfolio_id): Path<Uuid>,
     State(state): State<AppState>,
     user: LoggedInUser,
-    axum::extract::Query(query): axum::extract::Query<CellQuery>,
+    axum::extract::Query(query): axum::extract::Query<ItemQuery>,
 ) -> Result<maud::Markup, AppError> {
     portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
     let item_id = Uuid::parse_str(&query.item_id)?;
