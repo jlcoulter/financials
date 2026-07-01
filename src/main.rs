@@ -99,20 +99,70 @@ fn app(state: AppState) -> Router {
         )
         .route("/reconcile", axum::routing::get(pages::reconcile_list))
         .route("/reconcile", axum::routing::post(pages::reconcile_create))
-        .route("/reconcile/{id}", axum::routing::get(pages::reconcile_detail))
-        .route("/reconcile/{id}/delete", axum::routing::post(pages::reconcile_delete))
-        .route("/reconcile/{id}/rename", axum::routing::post(pages::rename_session))
-        .route("/reconcile/{id}/outgoing", axum::routing::post(pages::add_outgoing))
-        .route("/reconcile/{id}/outgoing/csv", axum::routing::post(pages::upload_outgoing_csv))
-        .route("/reconcile/{id}/reconciled", axum::routing::post(pages::add_reconciled))
-        .route("/reconcile/{id}/reconciled/csv", axum::routing::post(pages::upload_reconciled_csv))
-        .route("/reconcile/{id}/link", axum::routing::post(pages::link_txns))
-        .route("/reconcile/{id}/unlink", axum::routing::post(pages::unlink_txns))
-        .route("/reconcile/{id}/unlink-reconciled", axum::routing::post(pages::unlink_reconciled_txns))
-        .route("/reconcile/{id}/auto-match", axum::routing::post(pages::auto_match))
-        .route("/reconcile/{id}/confirm", axum::routing::post(pages::confirm_proposal))
-        .route("/reconcile/{id}/confirm-all", axum::routing::post(pages::confirm_all_proposals))
-        .route("/reconcile/{id}/reject", axum::routing::post(pages::reject_proposal))
+        .route(
+            "/reconcile/{id}",
+            axum::routing::get(pages::reconcile_detail),
+        )
+        .route(
+            "/reconcile/{id}/delete",
+            axum::routing::post(pages::reconcile_delete),
+        )
+        .route(
+            "/reconcile/{id}/rename",
+            axum::routing::post(pages::rename_session),
+        )
+        .route(
+            "/reconcile/{id}/outgoing",
+            axum::routing::post(pages::add_outgoing),
+        )
+        .route(
+            "/reconcile/{id}/outgoing/csv",
+            axum::routing::post(pages::upload_outgoing_csv),
+        )
+        .route(
+            "/reconcile/{id}/outgoing-csv/confirm",
+            axum::routing::post(pages::confirm_outgoing_csv),
+        )
+        .route(
+            "/reconcile/{id}/reconciled",
+            axum::routing::post(pages::add_reconciled),
+        )
+        .route(
+            "/reconcile/{id}/reconciled/csv",
+            axum::routing::post(pages::upload_reconciled_csv),
+        )
+        .route(
+            "/reconcile/{id}/reconciled-csv/confirm",
+            axum::routing::post(pages::confirm_reconciled_csv),
+        )
+        .route(
+            "/reconcile/{id}/link",
+            axum::routing::post(pages::link_txns),
+        )
+        .route(
+            "/reconcile/{id}/unlink",
+            axum::routing::post(pages::unlink_txns),
+        )
+        .route(
+            "/reconcile/{id}/unlink-reconciled",
+            axum::routing::post(pages::unlink_reconciled_txns),
+        )
+        .route(
+            "/reconcile/{id}/auto-match",
+            axum::routing::post(pages::auto_match),
+        )
+        .route(
+            "/reconcile/{id}/confirm",
+            axum::routing::post(pages::confirm_proposal),
+        )
+        .route(
+            "/reconcile/{id}/confirm-all",
+            axum::routing::post(pages::confirm_all_proposals),
+        )
+        .route(
+            "/reconcile/{id}/reject",
+            axum::routing::post(pages::reject_proposal),
+        )
         .nest_service("/static", ServeDir::new("src/static"))
         .fallback(pages::not_found)
         .with_state(state)

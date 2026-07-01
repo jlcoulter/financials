@@ -677,6 +677,57 @@ th.th--debt {
     color: var(--text);
 }
 
+/* CSV Import */
+.csv-preview {
+    margin: 1rem 0;
+    overflow-x: auto;
+}
+
+.csv-preview-table {
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.csv-preview-table th,
+.csv-preview-table td {
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+    white-space: nowrap;
+}
+
+.csv-preview-table th {
+    background: var(--card);
+    font-weight: 600;
+}
+
+.csv-col-numbers th {
+    background: var(--border);
+    font-size: 0.75rem;
+    color: var(--text-muted, #888);
+    font-weight: 400;
+}
+
+.csv-mapping {
+    margin: 1rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 400px;
+}
+
+.csv-mapping label {
+    font-weight: 600;
+    margin-top: 0.5rem;
+}
+
+.csv-mapping select {
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--card);
+    color: var(--text);
+}
+
 /* Reconcile */
 .reconcile-grid {
     display: grid;
@@ -699,11 +750,17 @@ th.th--debt {
     /* empty cell to fill the other column */
 }
 
-.reconcile-adds {
+.reconcile-toolbar {
     display: flex;
-    gap: 16px;
-    margin-top: 1rem;
+    gap: 8px;
     flex-wrap: wrap;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+
+.reconcile-toolbar .auto-match-form {
+    margin: 0;
+    align-self: flex-start;
 }
 
 .reconcile-add-form {
@@ -845,10 +902,5 @@ th.th--debt {
     display: inline;
     margin: 0;
     padding: 0;
-}
-
-.auto-match-form {
-    display: inline;
-    margin-top: 1rem;
 }
 

@@ -42,14 +42,12 @@ pub async fn create_session(
     name: &str,
 ) -> Result<Uuid, AppError> {
     let id = Uuid::now_v7();
-    sqlx::query(
-        "INSERT INTO reconcile_sessions (session_id, user_id, name) VALUES (?, ?, ?)",
-    )
-    .bind(id.to_string())
-    .bind(user_id.to_string())
-    .bind(name)
-    .execute(pool)
-    .await?;
+    sqlx::query("INSERT INTO reconcile_sessions (session_id, user_id, name) VALUES (?, ?, ?)")
+        .bind(id.to_string())
+        .bind(user_id.to_string())
+        .bind(name)
+        .execute(pool)
+        .await?;
     Ok(id)
 }
 
@@ -277,14 +275,12 @@ pub async fn link_transactions(
     reconciled_id: Uuid,
 ) -> Result<(), AppError> {
     let id = Uuid::now_v7();
-    sqlx::query(
-        "INSERT INTO match_links (match_id, outgoing_id, reconciled_id) VALUES (?, ?, ?)",
-    )
-    .bind(id.to_string())
-    .bind(outgoing_id.to_string())
-    .bind(reconciled_id.to_string())
-    .execute(pool)
-    .await?;
+    sqlx::query("INSERT INTO match_links (match_id, outgoing_id, reconciled_id) VALUES (?, ?, ?)")
+        .bind(id.to_string())
+        .bind(outgoing_id.to_string())
+        .bind(reconciled_id.to_string())
+        .execute(pool)
+        .await?;
 
     // Mark both as matched
     sqlx::query("UPDATE outgoing_txns SET matched = TRUE WHERE txn_id = ?")
@@ -318,19 +314,17 @@ pub async fn unlink_transaction(pool: &SqlitePool, match_id: Uuid) -> Result<(),
         .await?;
 
     // Check if outgoing still has other matches
-    let outgoing_matched: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM match_links WHERE outgoing_id = ?)",
-    )
-    .bind(outgoing_id.to_string())
-    .fetch_one(pool)
-    .await?;
+    let outgoing_matched: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM match_links WHERE outgoing_id = ?)")
+            .bind(outgoing_id.to_string())
+            .fetch_one(pool)
+            .await?;
 
-    let reconciled_matched: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM match_links WHERE reconciled_id = ?)",
-    )
-    .bind(reconciled_id.to_string())
-    .fetch_one(pool)
-    .await?;
+    let reconciled_matched: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM match_links WHERE reconciled_id = ?)")
+            .bind(reconciled_id.to_string())
+            .fetch_one(pool)
+            .await?;
 
     if !outgoing_matched {
         sqlx::query("UPDATE outgoing_txns SET matched = FALSE WHERE txn_id = ?")
@@ -348,10 +342,7 @@ pub async fn unlink_transaction(pool: &SqlitePool, match_id: Uuid) -> Result<(),
     Ok(())
 }
 
-pub async fn list_matches(
-    pool: &SqlitePool,
-    session_id: Uuid,
-) -> Result<Vec<MatchLink>, AppError> {
+pub async fn list_matches(pool: &SqlitePool, session_id: Uuid) -> Result<Vec<MatchLink>, AppError> {
     let rows = sqlx::query_as::<_, (String, String, String)>(
         "SELECT m.match_id, m.outgoing_id, m.reconciled_id \
          FROM match_links m \
@@ -383,12 +374,19 @@ pub struct Proposal {
     pub reconciled_ids: Vec<Uuid>,
 }
 
-pub async fn auto_match(pool: &SqlitePool, session_id: Uuid, skip_ids: &[Uuid]) -> Result<Vec<Proposal>, AppError> {
+pub async fn auto_match(
+    pool: &SqlitePool,
+    session_id: Uuid,
+    skip_ids: &[Uuid],
+) -> Result<Vec<Proposal>, AppError> {
     let outgoing = list_outgoing(pool, session_id).await?;
     let reconciled = list_reconciled(pool, session_id).await?;
 
     // Sort unmatched outgoing by amount descending so larger values get matched first
-    let mut unmatched_outgoing: Vec<&OutgoingTxn> = outgoing.iter().filter(|o| !o.matched && !skip_ids.contains(&o.txn_id)).collect();
+    let mut unmatched_outgoing: Vec<&OutgoingTxn> = outgoing
+        .iter()
+        .filter(|o| !o.matched && !skip_ids.contains(&o.txn_id))
+        .collect();
     unmatched_outgoing.sort_by(|a, b| b.amount.cmp(&a.amount));
     let unmatched_reconciled: Vec<&ReconciledTxn> =
         reconciled.iter().filter(|r| !r.matched).collect();
@@ -433,11 +431,7 @@ pub async fn auto_match(pool: &SqlitePool, session_id: Uuid, skip_ids: &[Uuid]) 
 
 /// Find a subset of up to `max_len` items whose amounts sum to `target`.
 /// Returns the txn_ids of the matching subset, or None.
-fn find_subset_sum(
-    items: &[&ReconciledTxn],
-    target: i64,
-    max_len: usize,
-) -> Option<Vec<Uuid>> {
+fn find_subset_sum(items: &[&ReconciledTxn], target: i64, max_len: usize) -> Option<Vec<Uuid>> {
     // Brute force for small max_len
     for len in 2..=max_len {
         if len > items.len() {
@@ -450,17 +444,9 @@ fn find_subset_sum(
     None
 }
 
-fn subset_sum_of_size(
-    items: &[&ReconciledTxn],
-    target: i64,
-    size: usize,
-) -> Option<Vec<Uuid>> {
+fn subset_sum_of_size(items: &[&ReconciledTxn], target: i64, size: usize) -> Option<Vec<Uuid>> {
     if size == 0 {
-        return if target == 0 {
-            Some(vec![])
-        } else {
-            None
-        };
+        return if target == 0 { Some(vec![]) } else { None };
     }
     if items.len() < size {
         return None;
