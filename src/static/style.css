@@ -677,4 +677,172 @@ th.th--debt {
     color: var(--text);
 }
 
+/* Reconcile */
+.reconcile-columns {
+    display: flex;
+    gap: 24px;
+    margin-top: 1rem;
+}
+
+.reconcile-col {
+    flex: 1;
+    min-width: 0;
+}
+
+.reconcile-col h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.1rem;
+    color: var(--text);
+}
+
+.reconcile-add-form {
+    flex-direction: column;
+    width: 100%;
+}
+
+.reconcile-txn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    transition: border-color 0.15s;
+}
+
+.reconcile-txn--unmatched {
+    border-left: 4px solid var(--yellow);
+}
+
+.reconcile-txn--matched {
+    border-left: 4px solid var(--green);
+    opacity: 0.8;
+}
+
+.txn-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.txn-date {
+    color: var(--muted);
+    font-family: monospace;
+    font-size: 0.85rem;
+}
+
+.txn-amount {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.txn-amount-col {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.txn-vendor {
+    color: var(--text);
+    font-size: 0.9rem;
+    margin-top: 2px;
+}
+
+.txn-matches {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.txn-match-label {
+    color: var(--muted);
+    font-size: 0.75rem;
+}
+
+.txn-match-tag {
+    display: inline-block;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 0.8rem;
+    color: var(--green);
+}
+
+.txn-match-form {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.txn-match-form select {
+    flex: 1;
+    padding: 4px 8px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.txn-match-form button {
+    padding: 4px 12px;
+    font-size: 0.85rem;
+}
+
+.txn-match-action {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.txn-match-action select {
+    flex: 1;
+    padding: 6px 8px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.txn-match-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.txn-card-checkbox {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    margin-right: 4px;
+    cursor: pointer;
+}
+
+.btn-sm {
+    padding: 4px 10px;
+    font-size: 0.8rem;
+}
+
+.txn-unlink-form {
+    display: inline;
+    margin: 0;
+    padding: 0;
+}
+
+.auto-match-form {
+    display: inline;
+    margin-top: 1rem;
+}
 
