@@ -729,6 +729,11 @@ th.th--debt {
     opacity: 0.85;
 }
 
+.reconcile-txn--proposed {
+    border-left: 4px solid #f59e0b;
+    background: color-mix(in srgb, #f59e0b 8%, var(--card));
+}
+
 .txn-row {
     display: flex;
     align-items: center;

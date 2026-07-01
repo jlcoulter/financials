@@ -378,17 +378,22 @@ pub async fn list_matches(
 /// with the exact same amount, or a set of unmatched reconciled txns whose amounts sum
 /// to the outgoing amount (up to 4 transactions).
 /// Returns the number of new matches created.
-pub async fn auto_match(pool: &SqlitePool, session_id: Uuid) -> Result<usize, AppError> {
+pub struct Proposal {
+    pub outgoing_id: Uuid,
+    pub reconciled_ids: Vec<Uuid>,
+}
+
+pub async fn auto_match(pool: &SqlitePool, session_id: Uuid, skip_ids: &[Uuid]) -> Result<Vec<Proposal>, AppError> {
     let outgoing = list_outgoing(pool, session_id).await?;
     let reconciled = list_reconciled(pool, session_id).await?;
 
     // Sort unmatched outgoing by amount descending so larger values get matched first
-    let mut unmatched_outgoing: Vec<&OutgoingTxn> = outgoing.iter().filter(|o| !o.matched).collect();
+    let mut unmatched_outgoing: Vec<&OutgoingTxn> = outgoing.iter().filter(|o| !o.matched && !skip_ids.contains(&o.txn_id)).collect();
     unmatched_outgoing.sort_by(|a, b| b.amount.cmp(&a.amount));
     let unmatched_reconciled: Vec<&ReconciledTxn> =
         reconciled.iter().filter(|r| !r.matched).collect();
 
-    let mut count = 0usize;
+    let mut proposals = Vec::new();
     let mut used: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
 
     for o in &unmatched_outgoing {
@@ -397,9 +402,11 @@ pub async fn auto_match(pool: &SqlitePool, session_id: Uuid) -> Result<usize, Ap
             .iter()
             .find(|r| !used.contains(&r.txn_id) && r.amount == o.amount)
         {
-            link_transactions(pool, o.txn_id, r.txn_id).await?;
+            proposals.push(Proposal {
+                outgoing_id: o.txn_id,
+                reconciled_ids: vec![r.txn_id],
+            });
             used.insert(r.txn_id);
-            count += 1;
             continue;
         }
 
@@ -411,15 +418,17 @@ pub async fn auto_match(pool: &SqlitePool, session_id: Uuid) -> Result<usize, Ap
             .collect();
 
         if let Some(combo) = find_subset_sum(&available, o.amount, 4) {
-            for r_id in combo {
-                link_transactions(pool, o.txn_id, r_id).await?;
-                used.insert(r_id);
+            for r_id in &combo {
+                used.insert(*r_id);
             }
-            count += 1;
+            proposals.push(Proposal {
+                outgoing_id: o.txn_id,
+                reconciled_ids: combo,
+            });
         }
     }
 
-    Ok(count)
+    Ok(proposals)
 }
 
 /// Find a subset of up to `max_len` items whose amounts sum to `target`.
