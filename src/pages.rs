@@ -3,6 +3,7 @@ use crate::cookies::LoggedInUser;
 use crate::error::AppError;
 use crate::layout::layout;
 use crate::models::portfolio::{self, BalanceLog, WealthItem};
+use crate::models::reconcile::{self, OutgoingTxn, ReconciledTxn};
 use crate::models::user;
 use crate::utils;
 use axum::extract::{Path, State};
@@ -884,6 +885,10 @@ pub async fn dashboard(State(state): State<AppState>, user: LoggedInUser) -> imp
                     h3 { "Insights" }
                     p { "View your financial insights" }
                 }
+                a href="/reconcile" class="card" {
+                    h3 { "Reconcile" }
+                    p { "Match outgoing transactions to reconciled records" }
+                }
             }
         },
         Some(&user),
@@ -1168,6 +1173,461 @@ pub async fn insights_chart(
         },
         Some(&user),
     ))
+}
+
+// ── Reconcile ──
+
+pub async fn reconcile_list(
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<maud::Markup, AppError> {
+    let sessions = reconcile::list_sessions(state.db(), user.0).await?;
+    Ok(layout(
+        "Reconcile",
+        maud::html! {
+            h2 { "Reconcile" }
+            details class="add-item-details" {
+                summary { "+ New Reconcile Session" }
+                form method="post" action="/reconcile" class="add-item-form" {
+                    label { "Name"
+                        input type="text" name="name" required {}
+                    }
+                    button type="submit" { "Create" }
+                }
+            }
+            @if sessions.is_empty() {
+                p { "No reconcile sessions yet. Create one to start matching transactions." }
+            } @else {
+                div class="portfolio-list" {
+                    @for (id, name) in &sessions {
+                        div class="portfolio-row" {
+                            div class="portfolio-info" {
+                                h3 { (name) }
+                            }
+                            div class="portfolio-actions" {
+                                a href=(format!("/reconcile/{}", id)) class="btn-view" { "View" }
+                                form method="post" action=(format!("/reconcile/{}/delete", id))
+                                     style="display:inline" {
+                                    button type="submit" class="btn-ghost" style="margin-left:0.5rem"
+                                            onclick="return confirm('Delete this session and all its data?')" { "Delete" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        Some(&user),
+    ))
+}
+
+#[derive(serde::Deserialize)]
+pub struct CreateSessionForm {
+    pub name: String,
+}
+
+pub async fn reconcile_create(
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<CreateSessionForm>,
+) -> Result<axum::response::Redirect, AppError> {
+    if form.name.trim().is_empty() {
+        return Err(AppError::BadRequest("Session name is required".into()));
+    }
+    let id = reconcile::create_session(state.db(), user.0, form.name.trim()).await?;
+    Ok(axum::response::Redirect::to(&format!("/reconcile/{}", id)))
+}
+
+pub async fn reconcile_delete(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::delete_session(state.db(), session_id).await?;
+    Ok(axum::response::Redirect::to("/reconcile"))
+}
+
+pub async fn reconcile_detail(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<maud::Markup, AppError> {
+    let (_, name) = reconcile::get_session(state.db(), session_id, user.0).await?;
+    let outgoing = reconcile::list_outgoing(state.db(), session_id).await?;
+    let reconciled = reconcile::list_reconciled(state.db(), session_id).await?;
+    let matches = reconcile::list_matches(state.db(), session_id).await?;
+
+    // Build lookup: outgoing_id -> list of reconciled_ids
+    let mut match_map: std::collections::HashMap<Uuid, Vec<Uuid>> = std::collections::HashMap::new();
+    let mut reverse_map: std::collections::HashMap<Uuid, Vec<(Uuid, Uuid)>> = std::collections::HashMap::new(); // reconciled_id -> [(match_id, outgoing_id)]
+    for m in &matches {
+        match_map.entry(m.outgoing_id).or_default().push(m.reconciled_id);
+        reverse_map.entry(m.reconciled_id).or_default().push((m.match_id, m.outgoing_id));
+    }
+
+    let unmatched_outgoing: Vec<&OutgoingTxn> = outgoing.iter().filter(|o| !o.matched).collect();
+    let unmatched_reconciled: Vec<&ReconciledTxn> = reconciled.iter().filter(|r| !r.matched).collect();
+
+    Ok(layout(
+        &format!("Reconcile — {}", name),
+        maud::html! {
+            a href="/reconcile" { "← Back" }
+            form class="portfolio-name-form" method="post" action=(format!("/reconcile/{}/rename", session_id)) {
+                input type="text" name="name" value=(name)
+                       class="portfolio-name-input"
+                       onblur="this.closest('form').requestSubmit()"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('form').requestSubmit()}" {}
+            }
+
+            div class="reconcile-columns" {
+                // ── Left: Outgoing ──
+                div class="reconcile-col" {
+                    h3 { "Outgoing" }
+                    details class="add-item-details" {
+                        summary { "+ Add Outgoing" }
+                        form method="post" action=(format!("/reconcile/{}/outgoing", session_id)) class="add-item-form reconcile-add-form" {
+                            label { "Date"
+                                input type="text" name="date" placeholder="YYYY-MM-DD" required {}
+                            }
+                            label { "Amount"
+                                input type="number" step="0.01" name="amount" placeholder="0.00" required {}
+                            }
+                            label { "Vendor"
+                                input type="text" name="vendor" {}
+                            }
+                            button type="submit" { "Add" }
+                        }
+                    }
+                    details class="add-item-details" {
+                        summary { "↑ Upload CSV" }
+                        form method="post" action=(format!("/reconcile/{}/outgoing/csv", session_id))
+                              enctype="multipart/form-data"
+                              class="add-item-form reconcile-add-form" {
+                            label { "CSV File"
+                                input type="file" name="csv_file" accept=".csv" {}
+                            }
+                            button type="submit" { "Upload" }
+                        }
+                        p style="font-size:0.75rem;color:var(--muted)" { "Expected columns: date, amount, vendor" }
+                    }
+                    @for o in &outgoing {
+                        div class=(if o.matched { "reconcile-txn reconcile-txn--matched" } else { "reconcile-txn reconcile-txn--unmatched" }) {
+                            div class="txn-header" {
+                                span class="txn-date" { (o.date) }
+                                span class="txn-amount" { (utils::format_cents(o.amount)) }
+                            }
+                            @if !o.vendor.is_empty() {
+                                div class="txn-vendor" { (o.vendor) }
+                            }
+                            @if o.matched {
+                                @if let Some(linked_ids) = match_map.get(&o.txn_id) {
+                                    div class="txn-matches" {
+                                        span class="txn-match-label" { "Matched:" }
+                                        @for rid in linked_ids {
+                                            @if let Some(r) = reconciled.iter().find(|x| x.txn_id == *rid) {
+                                                span class="txn-match-tag" {
+                                                    (utils::format_cents(r.amount))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                form method="post" action=(format!("/reconcile/{}/unlink", session_id)) class="txn-unlink-form" {
+                                    input type="hidden" name="outgoing_id" value=(o.txn_id) {}
+                                    button type="submit" class="btn-ghost" style="font-size:0.75rem" { "Unmatch" }
+                                }
+                            } @else {
+                                form class="txn-match-form" method="post" action=(format!("/reconcile/{}/link", session_id)) {
+                                    input type="hidden" name="outgoing_id" value=(o.txn_id) {}
+                                    select name="reconciled_id" {
+                                        option value="" { "— Match with —" }
+                                        @for r in &unmatched_reconciled {
+                                            option value=(r.txn_id) { (format!("{} {} {}", r.date, utils::format_cents(r.amount), r.vendor)) }
+                                        }
+                                    }
+                                    button type="submit" { "Match" }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── Right: Reconciled ──
+                div class="reconcile-col" {
+                    h3 { "Reconciled" }
+                    details class="add-item-details" {
+                        summary { "+ Add Reconciled" }
+                        form method="post" action=(format!("/reconcile/{}/reconciled", session_id)) class="add-item-form reconcile-add-form" {
+                            label { "Date"
+                                input type="text" name="date" placeholder="YYYY-MM-DD" required {}
+                            }
+                            label { "Amount"
+                                input type="number" step="0.01" name="amount" placeholder="0.00" required {}
+                            }
+                            label { "Vendor"
+                                input type="text" name="vendor" {}
+                            }
+                            button type="submit" { "Add" }
+                        }
+                    }
+                    details class="add-item-details" {
+                        summary { "↑ Upload CSV" }
+                        form method="post" action=(format!("/reconcile/{}/reconciled/csv", session_id))
+                              enctype="multipart/form-data"
+                              class="add-item-form reconcile-add-form" {
+                            label { "CSV File"
+                                input type="file" name="csv_file" accept=".csv" {}
+                            }
+                            button type="submit" { "Upload" }
+                        }
+                        p style="font-size:0.75rem;color:var(--muted)" { "Expected columns: date, amount, vendor" }
+                    }
+                    @for r in &reconciled {
+                        div class=(if r.matched { "reconcile-txn reconcile-txn--matched" } else { "reconcile-txn reconcile-txn--unmatched" }) {
+                            div class="txn-header" {
+                                span class="txn-date" { (r.date) }
+                                span class="txn-amount" { (utils::format_cents(r.amount)) }
+                            }
+                            @if !r.vendor.is_empty() {
+                                div class="txn-vendor" { (r.vendor) }
+                            }
+                            @if r.matched {
+                                @if let Some(pairs) = reverse_map.get(&r.txn_id) {
+                                    div class="txn-matches" {
+                                        span class="txn-match-label" { "Matched to:" }
+                                        @for (_, oid) in pairs {
+                                            @if let Some(o) = outgoing.iter().find(|x| x.txn_id == *oid) {
+                                                span class="txn-match-tag" {
+                                                    (format!("{} {}", o.date, utils::format_cents(o.amount)))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                form method="post" action=(format!("/reconcile/{}/unlink-reconciled", session_id)) class="txn-unlink-form" {
+                                    input type="hidden" name="reconciled_id" value=(r.txn_id) {}
+                                    button type="submit" class="btn-ghost" style="font-size:0.75rem" { "Unmatch" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Auto-match button ──
+            @if !unmatched_outgoing.is_empty() || !unmatched_reconciled.is_empty() {
+                form method="post" action=(format!("/reconcile/{}/auto-match", session_id)) class="auto-match-form" {
+                    button type="submit" class="btn" { "Auto-Match" }
+                }
+            }
+        },
+        Some(&user),
+    ))
+}
+
+#[derive(serde::Deserialize)]
+pub struct AddTxnForm {
+    pub date: String,
+    pub amount: String,
+    pub vendor: Option<String>,
+}
+
+pub async fn add_outgoing(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<AddTxnForm>,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    let date = NaiveDate::parse_from_str(&form.date, "%Y-%m-%d")
+        .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
+    let cents = utils::parse_dollars(&form.amount)
+        .map_err(AppError::BadRequest)?;
+    let vendor = form.vendor.map(|v| v.trim().to_string()).unwrap_or_default();
+    reconcile::add_outgoing(state.db(), session_id, date, cents, &vendor).await?;
+    Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)))
+}
+
+pub async fn add_reconciled(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<AddTxnForm>,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    let date = NaiveDate::parse_from_str(&form.date, "%Y-%m-%d")
+        .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
+    let cents = utils::parse_dollars(&form.amount)
+        .map_err(AppError::BadRequest)?;
+    let vendor = form.vendor.map(|v| v.trim().to_string()).unwrap_or_default();
+    reconcile::add_reconciled(state.db(), session_id, date, cents, &vendor).await?;
+    Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)))
+}
+
+#[derive(serde::Deserialize)]
+pub struct LinkForm {
+    pub outgoing_id: String,
+    pub reconciled_id: String,
+}
+
+pub async fn link_txns(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<LinkForm>,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    let outgoing_id = Uuid::parse_str(&form.outgoing_id)
+        .map_err(|_| AppError::BadRequest("Invalid outgoing ID".into()))?;
+    let reconciled_id = Uuid::parse_str(&form.reconciled_id)
+        .map_err(|_| AppError::BadRequest("Invalid reconciled ID".into()))?;
+    if reconciled_id.is_nil() || form.reconciled_id.is_empty() {
+        return Err(AppError::BadRequest("No reconciled transaction selected".into()));
+    }
+    reconcile::link_transactions(state.db(), outgoing_id, reconciled_id).await?;
+    Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)))
+}
+
+#[derive(serde::Deserialize)]
+pub struct UnlinkForm {
+    pub outgoing_id: String,
+}
+
+pub async fn unlink_txns(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<UnlinkForm>,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    let outgoing_id = Uuid::parse_str(&form.outgoing_id)
+        .map_err(|_| AppError::BadRequest("Invalid outgoing ID".into()))?;
+    // Find and remove all match_links for this outgoing
+    let matches = reconcile::list_matches(state.db(), session_id).await?;
+    for m in matches.iter().filter(|m| m.outgoing_id == outgoing_id) {
+        reconcile::unlink_transaction(state.db(), m.match_id).await?;
+    }
+    Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)))
+}
+
+#[derive(serde::Deserialize)]
+pub struct UnlinkReconciledForm {
+    pub reconciled_id: String,
+}
+
+pub async fn unlink_reconciled_txns(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<UnlinkReconciledForm>,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    let reconciled_id = Uuid::parse_str(&form.reconciled_id)
+        .map_err(|_| AppError::BadRequest("Invalid reconciled ID".into()))?;
+    let matches = reconcile::list_matches(state.db(), session_id).await?;
+    for m in matches.iter().filter(|m| m.reconciled_id == reconciled_id) {
+        reconcile::unlink_transaction(state.db(), m.match_id).await?;
+    }
+    Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)))
+}
+
+pub async fn auto_match(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::auto_match(state.db(), session_id).await?;
+    Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)))
+}
+
+#[derive(serde::Deserialize)]
+pub struct RenameSessionForm {
+    pub name: String,
+}
+
+pub async fn rename_session(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    axum::Form(form): axum::Form<RenameSessionForm>,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    if form.name.trim().is_empty() {
+        return Err(AppError::BadRequest("Session name cannot be empty".into()));
+    }
+    sqlx::query("UPDATE reconcile_sessions SET name = ? WHERE session_id = ?")
+        .bind(form.name.trim())
+        .bind(session_id.to_string())
+        .execute(state.db())
+        .await?;
+    Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)))
+}
+
+/// Parse a CSV with columns: date, amount, vendor
+/// Returns rows sorted by date. Deduplicates by (date, amount, vendor).
+fn parse_csv(raw: &str) -> Result<Vec<(NaiveDate, i64, String)>, AppError> {
+    let mut reader = csv::ReaderBuilder::new()
+        .flexible(true)
+        .from_reader(raw.as_bytes());
+    let mut rows: Vec<(NaiveDate, i64, String)> = Vec::new();
+    for result in reader.records() {
+        let record = result.map_err(|e| AppError::BadRequest(format!("CSV parse error: {}", e)))?;
+        if record.len() < 2 {
+            continue;
+        }
+        let date = NaiveDate::parse_from_str(record.get(0).unwrap_or("").trim(), "%Y-%m-%d")
+            .map_err(|_| AppError::BadRequest(format!("Invalid date: {}", record.get(0).unwrap_or(""))))?;
+        let amount_str = record.get(1).unwrap_or("0").trim();
+        let cents = utils::parse_dollars(amount_str)
+            .map_err(AppError::BadRequest)?;
+        let vendor = record.get(2).map(|s| s.trim().to_string()).unwrap_or_default();
+        rows.push((date, cents, vendor));
+    }
+    // Sort by date
+    rows.sort_by_key(|(d, _, _)| *d);
+    Ok(rows)
+}
+
+pub async fn upload_outgoing_csv(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    mut multipart: axum::extract::Multipart,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    while let Some(field) = multipart.next_field().await.map_err(|e| AppError::BadRequest(format!("Upload error: {}", e)))? {
+        if field.name() == Some("csv_file") {
+            let bytes = field.bytes().await.map_err(|e| AppError::BadRequest(format!("Upload error: {}", e)))?;
+            let raw = String::from_utf8(bytes.to_vec())
+                .map_err(|_| AppError::BadRequest("CSV must be UTF-8".into()))?;
+            let rows = parse_csv(&raw)?;
+            reconcile::bulk_add_outgoing(state.db(), session_id, &rows).await?;
+            return Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)));
+        }
+    }
+    Err(AppError::BadRequest("No CSV file provided".into()))
+}
+
+pub async fn upload_reconciled_csv(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    mut multipart: axum::extract::Multipart,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    while let Some(field) = multipart.next_field().await.map_err(|e| AppError::BadRequest(format!("Upload error: {}", e)))? {
+        if field.name() == Some("csv_file") {
+            let bytes = field.bytes().await.map_err(|e| AppError::BadRequest(format!("Upload error: {}", e)))?;
+            let raw = String::from_utf8(bytes.to_vec())
+                .map_err(|_| AppError::BadRequest("CSV must be UTF-8".into()))?;
+            let rows = parse_csv(&raw)?;
+            reconcile::bulk_add_reconciled(state.db(), session_id, &rows).await?;
+            return Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)));
+        }
+    }
+    Err(AppError::BadRequest("No CSV file provided".into()))
 }
 
 pub async fn time(State(_state): State<AppState>) -> impl IntoResponse {
