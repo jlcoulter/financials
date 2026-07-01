@@ -6,7 +6,7 @@ Personal finance app for reconciling transactions and tracking net worth over ti
 
 Two core functions:
 
-1. Transaction reconciliation — Basiq integration pulls transactions from linked bank accounts so you can see what needs reconciling across accounts.
+1. Transaction reconciliation — upload outgoing and reconciled (bank) transactions via CSV, auto-match by amount, manually confirm or reject proposals, and track which items still need matching.
 2. Wealth tracking — log balances across assets, debts, and investments to see how your position changes over time.
 
 Work in progress.
@@ -19,7 +19,7 @@ Work in progress.
 | Templates | maud 0.27 (axum feature)     |
 | Database  | sqlx 0.9 (SQLite)            |
 | Auth      | bcrypt 0.19, signed cookies  |
-| Static    | tower-http 0.7 (ServeDir)    |
+| Static    | tower-http 0.7 (ServeDir)   |
 | Logging   | tracing + tracing-subscriber |
 | Errors    | anyhow + custom AppError     |
 
@@ -36,12 +36,16 @@ src/
   models/
     user.rs      user DB queries
     portfolio.rs portfolio + wealth item queries
+    reconcile.rs reconciliation DB queries + auto-match
+    csv_import.rs CSV column detection + parsing
+  utils.rs       parse_dollars, format_cents
   static/
     style.css
     htmx.min.js
 migrations/
-  0001_init.sql       users table
-  0002_financials.sql portfolios, wealth_items, balance_logs
+  0001_init.sql              users table
+  0002_financials.sql        portfolios, wealth_items, balance_logs
+  0004_reconcile.sql         reconcile sessions + transactions
 ```
 
 ## Running
