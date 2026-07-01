@@ -1564,15 +1564,193 @@ pub async fn auto_match(
     Path(session_id): Path<Uuid>,
     State(state): State<AppState>,
     user: LoggedInUser,
-) -> Result<axum::response::Redirect, AppError> {
+) -> Result<maud::Markup, AppError> {
+    render_proposals_page(session_id, state, user, &[]).await
+}
+
+async fn render_proposals_page(
+    session_id: Uuid,
+    state: AppState,
+    user: crate::cookies::LoggedInUser,
+    skip_ids: &[Uuid],
+) -> Result<maud::Markup, AppError> {
     reconcile::get_session(state.db(), session_id, user.0).await?;
-    reconcile::auto_match(state.db(), session_id).await?;
-    Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)))
+    let proposals = reconcile::auto_match(state.db(), session_id, skip_ids).await?;
+    let (_, name) = reconcile::get_session(state.db(), session_id, user.0).await?;
+    let outgoing = reconcile::list_outgoing(state.db(), session_id).await?;
+    let reconciled = reconcile::list_reconciled(state.db(), session_id).await?;
+
+    Ok(layout(
+        &format!("Reconcile — {}", name),
+        maud::html! {
+            a href="/reconcile" { "← Back" }
+            form class="portfolio-name-form" method="post" action=(format!("/reconcile/{}/rename", session_id)) {
+                input type="text" name="name" value=(name)
+                       class="portfolio-name-input"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('form').requestSubmit()}" {}
+            }
+
+            h2 { "Auto-Match Proposals" }
+
+            @if proposals.is_empty() {
+                p { "No matches found." }
+                a href=(format!("/reconcile/{}", session_id)) { "← Back to reconcile" }
+            } @else {
+                p { (format!("Found {} proposed match(es). Review and confirm or reject each.", proposals.len())) }
+
+                form method="post" action=(format!("/reconcile/{}/confirm-all", session_id)) {
+                    @for sid in skip_ids {
+                        input type="hidden" name="skip_ids" value=(sid) {}
+                    }
+                    button type="submit" class="btn" { "Confirm All" }
+                    " "
+                    a href=(format!("/reconcile/{}", session_id)) class="btn btn-ghost" { "Cancel" }
+                }
+
+                div class="reconcile-grid" style="margin-top:1rem" {
+                    div class="reconcile-grid-header" { "Outgoing" }
+                    div class="reconcile-grid-header" { "Reconciled" }
+
+                    @for p in &proposals {
+                        @if let Some(o) = outgoing.iter().find(|x| x.txn_id == p.outgoing_id) {
+                            @let row_span = p.reconciled_ids.len().max(1);
+                            div class="reconcile-txn reconcile-txn--proposed" style=(format!("grid-row: span {}", row_span)) {
+                                div class="txn-row" {
+                                    span class="txn-date" { (o.date) }
+                                    @if !o.vendor.is_empty() {
+                                        span class="txn-vendor" { (o.vendor) }
+                                    }
+                                    span class="txn-amount" { (utils::format_cents(o.amount)) }
+                                    form method="post" action=(format!("/reconcile/{}/confirm", session_id)) class="txn-unlink-form" style="display:inline" {
+                                        input type="hidden" name="outgoing_id" value=(o.txn_id) {}
+                                        @for rid in &p.reconciled_ids {
+                                            input type="hidden" name="reconciled_ids" value=(rid) {}
+                                        }
+                                        @for sid in skip_ids {
+                                            input type="hidden" name="skip_ids" value=(sid) {}
+                                        }
+                                        button type="submit" class="btn btn-sm" { "Confirm" }
+                                    }
+                                    form method="post" action=(format!("/reconcile/{}/reject", session_id)) class="txn-unlink-form" style="display:inline" {
+                                        input type="hidden" name="outgoing_id" value=(o.txn_id) {}
+                                        @for sid in skip_ids {
+                                            input type="hidden" name="skip_ids" value=(sid) {}
+                                        }
+                                        button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Reject" }
+                                    }
+                                }
+                            }
+                            @for rid in &p.reconciled_ids {
+                                @if let Some(r) = reconciled.iter().find(|x| x.txn_id == *rid) {
+                                    div class="reconcile-txn reconcile-txn--proposed" {
+                                        div class="txn-row" {
+                                            span class="txn-date" { (r.date) }
+                                            @if !r.vendor.is_empty() {
+                                                span class="txn-vendor" { (r.vendor) }
+                                            }
+                                            span class="txn-amount" { (utils::format_cents(r.amount)) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        Some(&user),
+    ))
 }
 
 #[derive(serde::Deserialize)]
 pub struct RenameSessionForm {
     pub name: String,
+}
+
+pub async fn confirm_proposal(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    body: axum::body::Bytes,
+) -> Result<maud::Markup, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    let body_str = String::from_utf8_lossy(&body);
+    let mut outgoing_id: Option<Uuid> = None;
+    let mut reconciled_ids: Vec<Uuid> = Vec::new();
+    let mut skip_ids: Vec<Uuid> = Vec::new();
+    for pair in body_str.split('&') {
+        if let Some((key, val)) = pair.split_once('=') {
+            let key = key.to_string();
+            let val = val.to_string();
+            match key.as_str() {
+                "outgoing_id" => { outgoing_id = val.parse().ok(); }
+                "reconciled_ids" => { if let Ok(id) = val.parse() { reconciled_ids.push(id); } }
+                "skip_ids" => { if let Ok(id) = val.parse() { skip_ids.push(id); } }
+                _ => {}
+            }
+        }
+    }
+    // Apply this match
+    if let Some(oid) = outgoing_id {
+        for rid in &reconciled_ids {
+            reconcile::link_transactions(state.db(), oid, *rid).await?;
+        }
+        skip_ids.push(oid);
+    }
+    // Re-render remaining proposals
+    render_proposals_page(session_id, state, user, &skip_ids).await
+}
+
+pub async fn confirm_all_proposals(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    body: axum::body::Bytes,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    let body_str = String::from_utf8_lossy(&body);
+    let mut skip_ids: Vec<Uuid> = Vec::new();
+    for pair in body_str.split('&') {
+        if let Some((key, val)) = pair.split_once('=') {
+            if key == "skip_ids" {
+                if let Ok(id) = val.parse() { skip_ids.push(id); }
+            }
+        }
+    }
+    let proposals = reconcile::auto_match(state.db(), session_id, &skip_ids).await?;
+    for p in &proposals {
+        for rid in &p.reconciled_ids {
+            reconcile::link_transactions(state.db(), p.outgoing_id, *rid).await?;
+        }
+    }
+    Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)))
+}
+
+pub async fn reject_proposal(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    body: axum::body::Bytes,
+) -> Result<maud::Markup, AppError> {
+    reconcile::get_session(state.db(), session_id, user.0).await?;
+    let body_str = String::from_utf8_lossy(&body);
+    let mut rejected_id: Option<Uuid> = None;
+    let mut skip_ids: Vec<Uuid> = Vec::new();
+    for pair in body_str.split('&') {
+        if let Some((key, val)) = pair.split_once('=') {
+            let key = key.to_string();
+            let val = val.to_string();
+            match key.as_str() {
+                "outgoing_id" => { if let Ok(id) = val.parse() { rejected_id = Some(id); } }
+                "skip_ids" => { if let Ok(id) = val.parse() { skip_ids.push(id); } }
+                _ => {}
+            }
+        }
+    }
+    if let Some(id) = rejected_id {
+        skip_ids.push(id);
+    }
+    render_proposals_page(session_id, state, user, &skip_ids).await
 }
 
 pub async fn rename_session(
