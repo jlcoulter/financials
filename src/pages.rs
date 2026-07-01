@@ -1260,7 +1260,7 @@ pub async fn reconcile_detail(
 
     // Build lookup: outgoing_id -> list of reconciled_ids
     let mut match_map: std::collections::HashMap<Uuid, Vec<Uuid>> = std::collections::HashMap::new();
-    let mut reverse_map: std::collections::HashMap<Uuid, Vec<(Uuid, Uuid)>> = std::collections::HashMap::new(); // reconciled_id -> [(match_id, outgoing_id)]
+    let mut reverse_map: std::collections::HashMap<Uuid, Vec<(Uuid, Uuid)>> = std::collections::HashMap::new();
     for m in &matches {
         match_map.entry(m.outgoing_id).or_default().push(m.reconciled_id);
         reverse_map.entry(m.reconciled_id).or_default().push((m.match_id, m.outgoing_id));
@@ -1279,6 +1279,8 @@ pub async fn reconcile_detail(
                        onblur="this.closest('form').requestSubmit()"
                        onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('form').requestSubmit()}" {}
             }
+
+            form id="reconcile-match-form" method="post" action=(format!("/reconcile/{}/link", session_id)) {}
 
             div class="reconcile-columns" {
                 // ── Left: Outgoing ──
@@ -1313,48 +1315,40 @@ pub async fn reconcile_detail(
                     }
                     @for o in &outgoing {
                         div class=(if o.matched { "reconcile-txn reconcile-txn--matched" } else { "reconcile-txn reconcile-txn--unmatched" }) {
-                            div class="txn-header" {
+                            div class="txn-row" {
                                 span class="txn-date" { (o.date) }
-                                span class="txn-amount-col" {
-                                    span class="txn-amount" { (utils::format_cents(o.amount)) }
-                                    @if !o.matched {
-                                        button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match selected" }
-                                    }
+                                @if !o.vendor.is_empty() {
+                                    span class="txn-vendor" { (o.vendor) }
                                 }
-                            }
-                            @if !o.vendor.is_empty() {
-                                div class="txn-vendor" { (o.vendor) }
-                            }
-                            @if o.matched {
-                                @if let Some(linked_ids) = match_map.get(&o.txn_id) {
-                                    div class="txn-matches" {
-                                        span class="txn-match-label" { "Matched:" }
+                                span class="txn-amount" { (utils::format_cents(o.amount)) }
+                                @if !o.matched {
+                                    button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match" }
+                                }
+                                @if o.matched {
+                                    @if let Some(linked_ids) = match_map.get(&o.txn_id) {
                                         @for rid in linked_ids {
-                                            @if let Some(r) = reconciled.iter().find(|x| x.txn_id == *rid) {
-                                                span class="txn-match-tag" {
-                                                    (utils::format_cents(r.amount))
+                                            span class="txn-match-tag" {
+                                                (utils::format_cents(reconciled.iter().find(|x| x.txn_id == *rid).map(|r| r.amount).unwrap_or(0)))
+                                            }
+                                        }
+                                        @let reconciled_sum: i64 = linked_ids.iter()
+                                            .filter_map(|rid| reconciled.iter().find(|x| x.txn_id == *rid).map(|r| r.amount))
+                                            .sum();
+                                        @let diff = reconciled_sum - o.amount;
+                                        @if diff != 0 {
+                                            span class="txn-diff" {
+                                                @if diff > 0 {
+                                                    (format!("Over {}", utils::format_cents(diff)))
+                                                } @else {
+                                                    (format!("Under {}", utils::format_cents(diff.abs())))
                                                 }
                                             }
                                         }
                                     }
-                                    // Show difference if amounts don't balance
-                                    @let reconciled_sum: i64 = linked_ids.iter()
-                                        .filter_map(|rid| reconciled.iter().find(|x| x.txn_id == *rid).map(|r| r.amount))
-                                        .sum();
-                                    @let diff = reconciled_sum - o.amount;
-                                    @if diff != 0 {
-                                        div class="txn-diff" style="color: var(--red); font-size: 0.85rem; margin-top: 4px" {
-                                            @if diff > 0 {
-                                                (format!("Over by {}", utils::format_cents(diff)))
-                                            } @else {
-                                                (format!("Under by {}", utils::format_cents(diff.abs())))
-                                            }
-                                        }
+                                    form method="post" action=(format!("/reconcile/{}/unlink", session_id)) class="txn-unlink-form" {
+                                        input type="hidden" name="outgoing_id" value=(o.txn_id) {}
+                                        button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Unmatch" }
                                     }
-                                }
-                                form method="post" action=(format!("/reconcile/{}/unlink", session_id)) class="txn-unlink-form" {
-                                    input type="hidden" name="outgoing_id" value=(o.txn_id) {}
-                                    button type="submit" class="btn-ghost" style="font-size:0.75rem" { "Unmatch" }
                                 }
                             }
                         }
@@ -1364,7 +1358,6 @@ pub async fn reconcile_detail(
                 // ── Right: Reconciled ──
                 div class="reconcile-col" {
                     h3 { "Reconciled" }
-                    form id="reconcile-match-form" method="post" action=(format!("/reconcile/{}/link", session_id)) {}
                     details class="add-item-details" {
                         summary { "+ Add Reconciled" }
                         form method="post" action=(format!("/reconcile/{}/reconciled", session_id)) class="add-item-form reconcile-add-form" {
@@ -1394,32 +1387,27 @@ pub async fn reconcile_detail(
                     }
                     @for r in &reconciled {
                         div class=(if r.matched { "reconcile-txn reconcile-txn--matched" } else { "reconcile-txn reconcile-txn--unmatched" }) {
-                            div class="txn-header" {
+                            div class="txn-row" {
                                 @if !r.matched {
                                     input type="checkbox" name="reconciled_ids" value=(r.txn_id) form="reconcile-match-form" class="txn-card-checkbox" {}
                                 }
                                 span class="txn-date" { (r.date) }
+                                @if !r.vendor.is_empty() {
+                                    span class="txn-vendor" { (r.vendor) }
+                                }
                                 span class="txn-amount" { (utils::format_cents(r.amount)) }
-                            }
-                            @if !r.vendor.is_empty() {
-                                div class="txn-vendor" { (r.vendor) }
-                            }
-                            @if r.matched {
-                                @if let Some(pairs) = reverse_map.get(&r.txn_id) {
-                                    div class="txn-matches" {
-                                        span class="txn-match-label" { "Matched to:" }
+                                @if r.matched {
+                                    @if let Some(pairs) = reverse_map.get(&r.txn_id) {
                                         @for (_, oid) in pairs {
-                                            @if let Some(o) = outgoing.iter().find(|x| x.txn_id == *oid) {
-                                                span class="txn-match-tag" {
-                                                    (format!("{} {}", o.date, utils::format_cents(o.amount)))
-                                                }
+                                            span class="txn-match-tag" {
+                                                (outgoing.iter().find(|x| x.txn_id == *oid).map(|o| format!("{} {}", o.date, utils::format_cents(o.amount))).unwrap_or_default())
                                             }
                                         }
                                     }
-                                }
-                                form method="post" action=(format!("/reconcile/{}/unlink-reconciled", session_id)) class="txn-unlink-form" {
-                                    input type="hidden" name="reconciled_id" value=(r.txn_id) {}
-                                    button type="submit" class="btn-ghost" style="font-size:0.75rem" { "Unmatch" }
+                                    form method="post" action=(format!("/reconcile/{}/unlink-reconciled", session_id)) class="txn-unlink-form" {
+                                        input type="hidden" name="reconciled_id" value=(r.txn_id) {}
+                                        button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Unmatch" }
+                                    }
                                 }
                             }
                         }

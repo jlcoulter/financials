@@ -704,8 +704,8 @@ th.th--debt {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 10px 14px;
-    margin-bottom: 8px;
+    padding: 4px 10px;
+    margin-bottom: 4px;
     transition: border-color 0.15s;
 }
 
@@ -715,7 +715,14 @@ th.th--debt {
 
 .reconcile-txn--matched {
     border-left: 4px solid var(--green);
-    opacity: 0.8;
+    opacity: 0.85;
+}
+
+.txn-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .txn-header {
@@ -733,33 +740,38 @@ th.th--debt {
 
 .txn-amount {
     font-weight: 600;
-    font-size: 1rem;
+    font-size: 0.95rem;
+    margin-left: auto;
 }
 
-.txn-amount-col {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
+.txn-card-checkbox {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
 }
 
 .txn-vendor {
     color: var(--text);
-    font-size: 0.9rem;
-    margin-top: 2px;
+    font-size: 0.85rem;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .txn-matches {
-    margin-top: 6px;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     flex-wrap: wrap;
 }
 
 .txn-match-label {
     color: var(--muted);
-    font-size: 0.75rem;
+    font-size: 0.7rem;
 }
 
 .txn-match-tag {
@@ -767,9 +779,15 @@ th.th--debt {
     background: var(--surface2);
     border: 1px solid var(--border);
     border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 0.8rem;
+    padding: 1px 6px;
+    font-size: 0.75rem;
     color: var(--green);
+}
+
+.txn-diff {
+    color: var(--red);
+    font-size: 0.8rem;
+    font-weight: 600;
 }
 
 .txn-match-form {
@@ -792,34 +810,6 @@ th.th--debt {
 .txn-match-form button {
     padding: 4px 12px;
     font-size: 0.85rem;
-}
-
-.txn-match-action {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
-}
-
-.txn-match-action select {
-    flex: 1;
-    padding: 6px 8px;
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-size: 0.85rem;
-}
-
-.txn-match-checkbox {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 0;
-    font-size: 0.85rem;
-    cursor: pointer;
 }
 
 .txn-card-checkbox {
