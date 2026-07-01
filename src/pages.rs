@@ -1315,7 +1315,12 @@ pub async fn reconcile_detail(
                         div class=(if o.matched { "reconcile-txn reconcile-txn--matched" } else { "reconcile-txn reconcile-txn--unmatched" }) {
                             div class="txn-header" {
                                 span class="txn-date" { (o.date) }
-                                span class="txn-amount" { (utils::format_cents(o.amount)) }
+                                span class="txn-amount-col" {
+                                    span class="txn-amount" { (utils::format_cents(o.amount)) }
+                                    @if !o.matched {
+                                        button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match selected" }
+                                    }
+                                }
                             }
                             @if !o.vendor.is_empty() {
                                 div class="txn-vendor" { (o.vendor) }
@@ -1332,21 +1337,24 @@ pub async fn reconcile_detail(
                                             }
                                         }
                                     }
+                                    // Show difference if amounts don't balance
+                                    @let reconciled_sum: i64 = linked_ids.iter()
+                                        .filter_map(|rid| reconciled.iter().find(|x| x.txn_id == *rid).map(|r| r.amount))
+                                        .sum();
+                                    @let diff = reconciled_sum - o.amount;
+                                    @if diff != 0 {
+                                        div class="txn-diff" style="color: var(--red); font-size: 0.85rem; margin-top: 4px" {
+                                            @if diff > 0 {
+                                                (format!("Over by {}", utils::format_cents(diff)))
+                                            } @else {
+                                                (format!("Under by {}", utils::format_cents(diff.abs())))
+                                            }
+                                        }
+                                    }
                                 }
                                 form method="post" action=(format!("/reconcile/{}/unlink", session_id)) class="txn-unlink-form" {
                                     input type="hidden" name="outgoing_id" value=(o.txn_id) {}
                                     button type="submit" class="btn-ghost" style="font-size:0.75rem" { "Unmatch" }
-                                }
-                            } @else {
-                                form class="txn-match-form" method="post" action=(format!("/reconcile/{}/link", session_id)) {
-                                    input type="hidden" name="outgoing_id" value=(o.txn_id) {}
-                                    select name="reconciled_id" {
-                                        option value="" { "— Match with —" }
-                                        @for r in &unmatched_reconciled {
-                                            option value=(r.txn_id) { (format!("{} {} {}", r.date, utils::format_cents(r.amount), r.vendor)) }
-                                        }
-                                    }
-                                    button type="submit" { "Match" }
                                 }
                             }
                         }
@@ -1356,6 +1364,7 @@ pub async fn reconcile_detail(
                 // ── Right: Reconciled ──
                 div class="reconcile-col" {
                     h3 { "Reconciled" }
+                    form id="reconcile-match-form" method="post" action=(format!("/reconcile/{}/link", session_id)) {}
                     details class="add-item-details" {
                         summary { "+ Add Reconciled" }
                         form method="post" action=(format!("/reconcile/{}/reconciled", session_id)) class="add-item-form reconcile-add-form" {
@@ -1386,6 +1395,9 @@ pub async fn reconcile_detail(
                     @for r in &reconciled {
                         div class=(if r.matched { "reconcile-txn reconcile-txn--matched" } else { "reconcile-txn reconcile-txn--unmatched" }) {
                             div class="txn-header" {
+                                @if !r.matched {
+                                    input type="checkbox" name="reconciled_ids" value=(r.txn_id) form="reconcile-match-form" class="txn-card-checkbox" {}
+                                }
                                 span class="txn-date" { (r.date) }
                                 span class="txn-amount" { (utils::format_cents(r.amount)) }
                             }
@@ -1465,27 +1477,39 @@ pub async fn add_reconciled(
     Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)))
 }
 
-#[derive(serde::Deserialize)]
-pub struct LinkForm {
-    pub outgoing_id: String,
-    pub reconciled_id: String,
-}
-
 pub async fn link_txns(
     Path(session_id): Path<Uuid>,
     State(state): State<AppState>,
     user: LoggedInUser,
-    axum::Form(form): axum::Form<LinkForm>,
+    body: axum::body::Bytes,
 ) -> Result<axum::response::Redirect, AppError> {
     reconcile::get_session(state.db(), session_id, user.0).await?;
-    let outgoing_id = Uuid::parse_str(&form.outgoing_id)
-        .map_err(|_| AppError::BadRequest("Invalid outgoing ID".into()))?;
-    let reconciled_id = Uuid::parse_str(&form.reconciled_id)
-        .map_err(|_| AppError::BadRequest("Invalid reconciled ID".into()))?;
-    if reconciled_id.is_nil() || form.reconciled_id.is_empty() {
+    let body_str = String::from_utf8_lossy(&body);
+    let mut outgoing_id: Option<Uuid> = None;
+    let mut reconciled_ids: Vec<Uuid> = Vec::new();
+    for pair in body_str.split('&') {
+        if let Some((key, val)) = pair.split_once('=') {
+            match key {
+                "outgoing_id" => {
+                    outgoing_id = Some(Uuid::parse_str(val)
+                        .map_err(|_| AppError::BadRequest("Invalid outgoing ID".into()))?);
+                }
+                "reconciled_ids" => {
+                    let id = Uuid::parse_str(val)
+                        .map_err(|_| AppError::BadRequest("Invalid reconciled ID".into()))?;
+                    reconciled_ids.push(id);
+                }
+                _ => {}
+            }
+        }
+    }
+    let outgoing_id = outgoing_id.ok_or_else(|| AppError::BadRequest("No outgoing selected".into()))?;
+    if reconciled_ids.is_empty() {
         return Err(AppError::BadRequest("No reconciled transaction selected".into()));
     }
-    reconcile::link_transactions(state.db(), outgoing_id, reconciled_id).await?;
+    for reconciled_id in reconciled_ids {
+        reconcile::link_transactions(state.db(), outgoing_id, reconciled_id).await?;
+    }
     Ok(axum::response::Redirect::to(&format!("/reconcile/{}", session_id)))
 }
 

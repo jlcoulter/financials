@@ -382,7 +382,9 @@ pub async fn auto_match(pool: &SqlitePool, session_id: Uuid) -> Result<usize, Ap
     let outgoing = list_outgoing(pool, session_id).await?;
     let reconciled = list_reconciled(pool, session_id).await?;
 
-    let unmatched_outgoing: Vec<&OutgoingTxn> = outgoing.iter().filter(|o| !o.matched).collect();
+    // Sort unmatched outgoing by amount descending so larger values get matched first
+    let mut unmatched_outgoing: Vec<&OutgoingTxn> = outgoing.iter().filter(|o| !o.matched).collect();
+    unmatched_outgoing.sort_by(|a, b| b.amount.cmp(&a.amount));
     let unmatched_reconciled: Vec<&ReconciledTxn> =
         reconciled.iter().filter(|r| !r.matched).collect();
 
