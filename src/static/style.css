@@ -678,21 +678,32 @@ th.th--debt {
 }
 
 /* Reconcile */
-.reconcile-columns {
-    display: flex;
-    gap: 24px;
+.reconcile-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 12px;
     margin-top: 1rem;
+    align-items: stretch;
 }
 
-.reconcile-col {
-    flex: 1;
-    min-width: 0;
-}
-
-.reconcile-col h3 {
-    margin: 0 0 0.5rem 0;
-    font-size: 1.1rem;
+.reconcile-grid-header {
+    font-weight: 600;
+    font-size: 1rem;
     color: var(--text);
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2px;
+}
+
+.reconcile-grid-spacer {
+    /* empty cell to fill the other column */
+}
+
+.reconcile-adds {
+    display: flex;
+    gap: 16px;
+    margin-top: 1rem;
+    flex-wrap: wrap;
 }
 
 .reconcile-add-form {
