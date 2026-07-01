@@ -1268,6 +1268,7 @@ pub async fn reconcile_detail(
 
     let unmatched_outgoing: Vec<&OutgoingTxn> = outgoing.iter().filter(|o| !o.matched).collect();
     let unmatched_reconciled: Vec<&ReconciledTxn> = reconciled.iter().filter(|r| !r.matched).collect();
+    let unmatched_max = unmatched_outgoing.len().max(unmatched_reconciled.len());
 
     Ok(layout(
         &format!("Reconcile — {}", name),
@@ -1282,66 +1283,38 @@ pub async fn reconcile_detail(
 
             form id="reconcile-match-form" method="post" action=(format!("/reconcile/{}/link", session_id)) {}
 
-            div class="reconcile-columns" {
-                // ── Left: Outgoing ──
-                div class="reconcile-col" {
-                    h3 { "Outgoing" }
-                    details class="add-item-details" {
-                        summary { "+ Add Outgoing" }
-                        form method="post" action=(format!("/reconcile/{}/outgoing", session_id)) class="add-item-form reconcile-add-form" {
-                            label { "Date"
-                                input type="text" name="date" placeholder="YYYY-MM-DD" required {}
-                            }
-                            label { "Amount"
-                                input type="number" step="0.01" name="amount" placeholder="0.00" required {}
-                            }
-                            label { "Vendor"
-                                input type="text" name="vendor" {}
-                            }
-                            button type="submit" { "Add" }
-                        }
-                    }
-                    details class="add-item-details" {
-                        summary { "↑ Upload CSV" }
-                        form method="post" action=(format!("/reconcile/{}/outgoing/csv", session_id))
-                              enctype="multipart/form-data"
-                              class="add-item-form reconcile-add-form" {
-                            label { "CSV File"
-                                input type="file" name="csv_file" accept=".csv" {}
-                            }
-                            button type="submit" { "Upload" }
-                        }
-                        p style="font-size:0.75rem;color:var(--muted)" { "Expected columns: date, amount, vendor" }
-                    }
-                    @for o in &outgoing {
-                        div class=(if o.matched { "reconcile-txn reconcile-txn--matched" } else { "reconcile-txn reconcile-txn--unmatched" }) {
-                            div class="txn-row" {
-                                span class="txn-date" { (o.date) }
-                                @if !o.vendor.is_empty() {
-                                    span class="txn-vendor" { (o.vendor) }
-                                }
-                                span class="txn-amount" { (utils::format_cents(o.amount)) }
-                                @if !o.matched {
-                                    button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match" }
-                                }
-                                @if o.matched {
-                                    @if let Some(linked_ids) = match_map.get(&o.txn_id) {
-                                        @for rid in linked_ids {
-                                            span class="txn-match-tag" {
-                                                (utils::format_cents(reconciled.iter().find(|x| x.txn_id == *rid).map(|r| r.amount).unwrap_or(0)))
-                                            }
+            div class="reconcile-grid" {
+                // ── Header row ──
+                div class="reconcile-grid-header" { "Outgoing" }
+                div class="reconcile-grid-header" { "Reconciled" }
+
+                // ── Matched pairs: outgoing on left, its reconciled stack on right ──
+                @for o in &outgoing {
+                    @if o.matched {
+                        @if let Some(linked_ids) = match_map.get(&o.txn_id) {
+                            @let row_span = linked_ids.len().max(1);
+                            div class="reconcile-txn reconcile-txn--matched" style=(format!("grid-row: span {}", row_span)) {
+                                div class="txn-row" {
+                                    span class="txn-date" { (o.date) }
+                                    @if !o.vendor.is_empty() {
+                                        span class="txn-vendor" { (o.vendor) }
+                                    }
+                                    span class="txn-amount" { (utils::format_cents(o.amount)) }
+                                    @for rid in linked_ids {
+                                        span class="txn-match-tag" {
+                                            (utils::format_cents(reconciled.iter().find(|x| x.txn_id == *rid).map(|r| r.amount).unwrap_or(0)))
                                         }
-                                        @let reconciled_sum: i64 = linked_ids.iter()
-                                            .filter_map(|rid| reconciled.iter().find(|x| x.txn_id == *rid).map(|r| r.amount))
-                                            .sum();
-                                        @let diff = reconciled_sum - o.amount;
-                                        @if diff != 0 {
-                                            span class="txn-diff" {
-                                                @if diff > 0 {
-                                                    (format!("Over {}", utils::format_cents(diff)))
-                                                } @else {
-                                                    (format!("Under {}", utils::format_cents(diff.abs())))
-                                                }
+                                    }
+                                    @let reconciled_sum: i64 = linked_ids.iter()
+                                        .filter_map(|rid| reconciled.iter().find(|x| x.txn_id == *rid).map(|r| r.amount))
+                                        .sum();
+                                    @let diff = reconciled_sum - o.amount;
+                                    @if diff != 0 {
+                                        span class="txn-diff" {
+                                            @if diff > 0 {
+                                                (format!("Over {}", utils::format_cents(diff)))
+                                            } @else {
+                                                (format!("Under {}", utils::format_cents(diff.abs())))
                                             }
                                         }
                                     }
@@ -1351,66 +1324,109 @@ pub async fn reconcile_detail(
                                     }
                                 }
                             }
+                            @for rid in linked_ids {
+                                @if let Some(r) = reconciled.iter().find(|x| x.txn_id == *rid) {
+                                    div class="reconcile-txn reconcile-txn--matched" {
+                                        div class="txn-row" {
+                                            span class="txn-date" { (r.date) }
+                                            @if !r.vendor.is_empty() {
+                                                span class="txn-vendor" { (r.vendor) }
+                                            }
+                                            span class="txn-amount" { (utils::format_cents(r.amount)) }
+                                            form method="post" action=(format!("/reconcile/{}/unlink-reconciled", session_id)) class="txn-unlink-form" {
+                                                input type="hidden" name="reconciled_id" value=(r.txn_id) {}
+                                                button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Unmatch" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
 
-                // ── Right: Reconciled ──
-                div class="reconcile-col" {
-                    h3 { "Reconciled" }
-                    details class="add-item-details" {
-                        summary { "+ Add Reconciled" }
-                        form method="post" action=(format!("/reconcile/{}/reconciled", session_id)) class="add-item-form reconcile-add-form" {
-                            label { "Date"
-                                input type="text" name="date" placeholder="YYYY-MM-DD" required {}
-                            }
-                            label { "Amount"
-                                input type="number" step="0.01" name="amount" placeholder="0.00" required {}
-                            }
-                            label { "Vendor"
-                                input type="text" name="vendor" {}
-                            }
-                            button type="submit" { "Add" }
-                        }
-                    }
-                    details class="add-item-details" {
-                        summary { "↑ Upload CSV" }
-                        form method="post" action=(format!("/reconcile/{}/reconciled/csv", session_id))
-                              enctype="multipart/form-data"
-                              class="add-item-form reconcile-add-form" {
-                            label { "CSV File"
-                                input type="file" name="csv_file" accept=".csv" {}
-                            }
-                            button type="submit" { "Upload" }
-                        }
-                        p style="font-size:0.75rem;color:var(--muted)" { "Expected columns: date, amount, vendor" }
-                    }
-                    @for r in &reconciled {
-                        div class=(if r.matched { "reconcile-txn reconcile-txn--matched" } else { "reconcile-txn reconcile-txn--unmatched" }) {
+                // ── Unmatched pairs: outgoing left, reconciled right ──
+                @for i in 0..unmatched_max {
+                    @if let Some(o) = unmatched_outgoing.get(i) {
+                        div class="reconcile-txn reconcile-txn--unmatched" {
                             div class="txn-row" {
-                                @if !r.matched {
-                                    input type="checkbox" name="reconciled_ids" value=(r.txn_id) form="reconcile-match-form" class="txn-card-checkbox" {}
+                                span class="txn-date" { (o.date) }
+                                @if !o.vendor.is_empty() {
+                                    span class="txn-vendor" { (o.vendor) }
                                 }
+                                span class="txn-amount" { (utils::format_cents(o.amount)) }
+                                button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match" }
+                            }
+                        }
+                    } @else {
+                        div class="reconcile-grid-spacer" {}
+                    }
+                    @if let Some(r) = unmatched_reconciled.get(i) {
+                        div class="reconcile-txn reconcile-txn--unmatched" {
+                            div class="txn-row" {
+                                input type="checkbox" name="reconciled_ids" value=(r.txn_id) form="reconcile-match-form" class="txn-card-checkbox" {}
                                 span class="txn-date" { (r.date) }
                                 @if !r.vendor.is_empty() {
                                     span class="txn-vendor" { (r.vendor) }
                                 }
                                 span class="txn-amount" { (utils::format_cents(r.amount)) }
-                                @if r.matched {
-                                    @if let Some(pairs) = reverse_map.get(&r.txn_id) {
-                                        @for (_, oid) in pairs {
-                                            span class="txn-match-tag" {
-                                                (outgoing.iter().find(|x| x.txn_id == *oid).map(|o| format!("{} {}", o.date, utils::format_cents(o.amount))).unwrap_or_default())
-                                            }
-                                        }
-                                    }
-                                    form method="post" action=(format!("/reconcile/{}/unlink-reconciled", session_id)) class="txn-unlink-form" {
-                                        input type="hidden" name="reconciled_id" value=(r.txn_id) {}
-                                        button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Unmatch" }
-                                    }
-                                }
                             }
                         }
+                    } @else {
+                        div class="reconcile-grid-spacer" {}
+                    }
+                }
+            }
+
+            // ── Add forms below the grid ──
+            div class="reconcile-adds" {
+                details class="add-item-details" {
+                    summary { "+ Add Outgoing" }
+                    form method="post" action=(format!("/reconcile/{}/outgoing", session_id)) class="add-item-form reconcile-add-form" {
+                        label { "Date"
+                            input type="text" name="date" placeholder="YYYY-MM-DD" required {}
+                        }
+                        label { "Amount"
+                            input type="number" step="0.01" name="amount" placeholder="0.00" required {}
+                        }
+                        label { "Vendor"
+                            input type="text" name="vendor" {}
+                        }
+                        button type="submit" { "Add" }
+                    }
+                }
+                details class="add-item-details" {
+                    summary { "+ Add Reconciled" }
+                    form method="post" action=(format!("/reconcile/{}/reconciled", session_id)) class="add-item-form reconcile-add-form" {
+                        label { "Date"
+                            input type="text" name="date" placeholder="YYYY-MM-DD" required {}
+                        }
+                        label { "Amount"
+                            input type="number" step="0.01" name="amount" placeholder="0.00" required {}
+                        }
+                        label { "Vendor"
+                            input type="text" name="vendor" {}
+                        }
+                        button type="submit" { "Add" }
+                    }
+                }
+                details class="add-item-details" {
+                    summary { "↑ Upload CSV" }
+                    form method="post" action=(format!("/reconcile/{}/outgoing/csv", session_id))
+                          enctype="multipart/form-data"
+                          class="add-item-form reconcile-add-form" {
+                        label { "Outgoing CSV"
+                            input type="file" name="csv_file" accept=".csv" {}
+                        }
+                        button type="submit" { "Upload Outgoing" }
+                    }
+                    form method="post" action=(format!("/reconcile/{}/reconciled/csv", session_id))
+                          enctype="multipart/form-data"
+                          class="add-item-form reconcile-add-form" {
+                        label { "Reconciled CSV"
+                            input type="file" name="csv_file" accept=".csv" {}
+                        }
+                        button type="submit" { "Upload Reconciled" }
                     }
                 }
             }
