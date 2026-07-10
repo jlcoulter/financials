@@ -11,3 +11,4 @@ AGENTS.md
 .direnv/
 .vscode/
 .idea
+litestream.yml

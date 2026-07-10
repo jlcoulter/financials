@@ -1,8 +1,0 @@
-dbs:
-  - path: data.db
-    replicas:
-      - url: b2://jlcoulter-financials
-        auth:
-          account_id: 004e5d96e4e28760000000004
-          application_key: K004xfTOis0u7gABRSkxBKdMwz5SUjc
-        path: financials-backups
