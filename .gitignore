@@ -12,3 +12,4 @@ AGENTS.md
 .vscode/
 .idea
 litestream.yml
+data.db-wal

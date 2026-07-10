@@ -2665,7 +2665,7 @@ pub async fn settings(
         .await
         .unwrap_or_else(|_| "User".to_string());
 
-    let (provider, bucket, path, region, endpoint, access_key_id, b2_key_id, _enabled) =
+    let (provider, bucket, path, region, endpoint, access_key_id, b2_key_id, b2_endpoint, _enabled) =
         match &config {
             Some(c) => (
                 c.provider.clone(),
@@ -2675,6 +2675,7 @@ pub async fn settings(
                 c.endpoint.clone(),
                 c.access_key_id.clone(),
                 c.b2_key_id.clone(),
+                c.b2_endpoint.clone(),
                 c.enabled,
             ),
             None => (
@@ -2682,6 +2683,7 @@ pub async fn settings(
                 String::new(),
                 "financials-backups".to_string(),
                 "us-east-1".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -2774,6 +2776,9 @@ pub async fn settings(
                     }
 
                     div id="b2-fields" style=(b2_style) {
+                        label { "S3 Endpoint"
+                            input type="text" name="b2_endpoint" value=(b2_endpoint.unwrap_or_else(|| "s3.us-west-004.backblazeb2.com".to_string())) placeholder="s3.us-west-004.backblazeb2.com";
+                        }
                         label { "Key ID"
                             input type="text" name="b2_key_id" value=(b2_key_id.unwrap_or_default()) autocomplete="off";
                         }
@@ -2810,6 +2815,7 @@ pub struct BackupForm {
     secret_access_key: Option<String>,
     b2_key_id: Option<String>,
     b2_application_key: Option<String>,
+    b2_endpoint: Option<String>,
 }
 
 pub async fn settings_backup_post(
@@ -2823,6 +2829,7 @@ pub async fn settings_backup_post(
     let secret_access_key = form.secret_access_key.filter(|s| !s.trim().is_empty());
     let b2_key_id = form.b2_key_id.filter(|s| !s.trim().is_empty());
     let b2_application_key = form.b2_application_key.filter(|s| !s.trim().is_empty());
+    let b2_endpoint = form.b2_endpoint.filter(|s| !s.trim().is_empty());
 
     // If secret_access_key is empty and we have an existing config, keep the old one
     let secret_access_key = match secret_access_key {
@@ -2852,6 +2859,7 @@ pub async fn settings_backup_post(
         secret_access_key,
         b2_key_id,
         b2_application_key,
+        b2_endpoint,
         enabled: false, // Start paused; user explicitly enables
     };
 
@@ -2868,6 +2876,7 @@ pub async fn settings_backup_post(
             c.secret_access_key = config.secret_access_key;
             c.b2_key_id = config.b2_key_id;
             c.b2_application_key = config.b2_application_key;
+            c.b2_endpoint = config.b2_endpoint;
             c
         }
         None => config,

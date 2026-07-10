@@ -43,6 +43,7 @@ async fn save_and_get_config_s3() {
         secret_access_key: Some("secret456".to_string()),
         b2_key_id: None,
         b2_application_key: None,
+        b2_endpoint: None,
         enabled: false,
     };
 
@@ -73,6 +74,7 @@ async fn save_and_get_config_b2() {
         secret_access_key: None,
         b2_key_id: Some("key-id-123".to_string()),
         b2_application_key: Some("app-key-456".to_string()),
+        b2_endpoint: Some("s3.us-west-004.backblazeb2.com".to_string()),
         enabled: true,
     };
 
@@ -108,6 +110,7 @@ async fn save_config_upserts_existing() {
         secret_access_key: Some("secret".to_string()),
         b2_key_id: None,
         b2_application_key: None,
+        b2_endpoint: None,
         enabled: false,
     };
 
@@ -140,6 +143,7 @@ async fn set_enabled_toggles_state() {
         secret_access_key: Some("secret".to_string()),
         b2_key_id: None,
         b2_application_key: None,
+        b2_endpoint: None,
         enabled: false,
     };
 
@@ -179,6 +183,7 @@ async fn save_config_with_custom_endpoint() {
         secret_access_key: Some("miniosecret".to_string()),
         b2_key_id: None,
         b2_application_key: None,
+        b2_endpoint: None,
         enabled: false,
     };
 
