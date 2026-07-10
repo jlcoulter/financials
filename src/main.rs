@@ -99,6 +99,7 @@ fn app(state: AppState) -> Router {
         )
         .route("/portfolio/{id}/import", axum::routing::get(pages::portfolio_import))
         .route("/portfolio/{id}/import", axum::routing::post(pages::portfolio_import_post))
+        .route("/portfolio/{id}/import/confirm", axum::routing::post(pages::portfolio_import_confirm))
         .route("/portfolio/{id}/export/csv", axum::routing::get(pages::portfolio_csv))
         .route("/reconcile", axum::routing::get(pages::reconcile_list))
         .route("/reconcile", axum::routing::post(pages::reconcile_create))

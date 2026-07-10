@@ -311,114 +311,106 @@ pub struct ImportResult {
     pub items_created: usize,
 }
 
-/// Import a pivot-style CSV into a portfolio.
+/// How a single data column maps to a wealth item.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub enum ColumnTarget {
+    /// Map to an existing wealth item by its ID.
+    Existing(String),
+    /// Create a new wealth item with this name and type.
+    New { name: String, item_type: String },
+    /// Skip this column entirely.
+    Skip,
+}
+
+/// Column mapping for portfolio CSV import.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct PortfolioColumnMapping {
+    /// Which column index is the date (0-based).
+    pub date_col: usize,
+    /// Date format string for parsing.
+    pub date_format: String,
+    /// Mapping for each non-date column (by column index).
+    /// Key is the 0-based column index.
+    pub columns: std::collections::HashMap<usize, ColumnTarget>,
+}
+
+/// Import a CSV into a portfolio using explicit column mapping.
 ///
-/// Format: first column is date, remaining columns are wealth item names.
-/// The header row defines which column maps to which item.
-/// Items that don't exist yet are created with `default_type`.
-/// Values are upserted (update if date+item already exists).
+/// The caller provides which column is the date and what each other
+/// column maps to (existing item, new item, or skip).
 pub async fn import_csv(
     pool: &SqlitePool,
     portfolio_id: Uuid,
     raw: &str,
-    default_type: &str,
-    column_types: &std::collections::HashMap<usize, String>,
+    mapping: &PortfolioColumnMapping,
 ) -> Result<ImportResult, AppError> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .from_reader(raw.as_bytes());
 
-    let headers = reader
-        .headers()
-        .map_err(|e| AppError::BadRequest(format!("Failed to read CSV headers: {}", e)))?
-        .clone();
-
-    if headers.is_empty() {
-        return Err(AppError::BadRequest("CSV file is empty".into()));
-    }
-
-    // Columns after the first are wealth item names
-    let item_columns: Vec<(String, String)> = headers
-        .iter()
-        .skip(1)
-        .enumerate()
-        .map(|(i, name)| {
-            let resolved_type = column_types
-                .get(&(i + 1))
-                .cloned()
-                .unwrap_or_else(|| default_type.to_string());
-            (name.trim().to_string(), resolved_type)
-        })
+    let records: Vec<csv::StringRecord> = reader
+        .records()
+        .filter_map(|r| r.ok())
         .collect();
 
-    for (name, _) in &item_columns {
-        if name.is_empty() {
-            return Err(AppError::BadRequest(
-                "Column headers cannot be empty".into(),
-            ));
-        }
+    if records.is_empty() {
+        return Err(AppError::BadRequest("CSV has no data rows".into()));
     }
 
-    // Create wealth items that don't exist yet
+    // Build ordered list of (column_index, item_id) for data columns that map to items
     let existing_items = list_wealth_items(pool, portfolio_id).await?;
-    let existing_names: std::collections::HashMap<String, Uuid> = existing_items
+    let existing_by_id: std::collections::HashMap<String, Uuid> = existing_items
         .iter()
-        .map(|wi| (wi.name.clone(), wi.item_id))
+        .map(|wi| (wi.item_id.to_string(), wi.item_id))
         .collect();
 
-    let mut item_ids: Vec<Uuid> = Vec::new();
+    let mut col_item_ids: Vec<(usize, Uuid)> = Vec::new();
     let mut items_created = 0usize;
-    for (name, itype) in &item_columns {
-        if let Some(&id) = existing_names.get(name) {
-            item_ids.push(id);
-        } else {
-            let id = create_wealth_item(pool, portfolio_id, name, itype).await?;
-            item_ids.push(id);
-            items_created += 1;
+
+    for (&col_idx, target) in &mapping.columns {
+        match target {
+            ColumnTarget::Existing(id_str) => {
+                if let Some(&item_id) = existing_by_id.get(id_str) {
+                    col_item_ids.push((col_idx, item_id));
+                }
+                // else skip silently — bad ID
+            }
+            ColumnTarget::New { name, item_type } => {
+                // Check if an item with this name already exists
+                let existing = existing_items.iter().find(|wi| wi.name == *name);
+                let item_id = if let Some(wi) = existing {
+                    wi.item_id
+                } else {
+                    let id = create_wealth_item(pool, portfolio_id, name, item_type).await?;
+                    items_created += 1;
+                    id
+                };
+                col_item_ids.push((col_idx, item_id));
+            }
+            ColumnTarget::Skip => {}
         }
     }
 
     let mut rows_imported = 0usize;
     let mut rows_skipped = 0usize;
 
-    // Detect date format from first data row
-    let date_formats = [
-        "%Y-%m-%d",
-        "%m/%d/%Y",
-        "%d/%m/%Y",
-        "%m/%d/%y",
-        "%d/%m/%y",
-        "%Y/%m/%d",
-    ];
+    for record in &records {
+        let date_str = record.get(mapping.date_col).unwrap_or("").trim();
+        if date_str.is_empty() {
+            rows_skipped += 1;
+            continue;
+        }
 
-    for result in reader.records() {
-        let record = match result {
-            Ok(r) => r,
+        let log_date = match NaiveDate::parse_from_str(date_str, &mapping.date_format) {
+            Ok(d) => d,
             Err(_) => {
                 rows_skipped += 1;
                 continue;
             }
         };
 
-        let date_str = record.get(0).unwrap_or("").trim();
-        if date_str.is_empty() {
-            rows_skipped += 1;
-            continue;
-        }
-
-        let log_date = match date_formats
-            .iter()
-            .find_map(|fmt| NaiveDate::parse_from_str(date_str, fmt).ok())
-        {
-            Some(d) => d,
-            None => {
-                rows_skipped += 1;
-                continue;
-            }
-        };
-
-        for (i, item_id) in item_ids.iter().enumerate() {
-            let value_str = record.get(i + 1).unwrap_or("").trim();
+        for &(col_idx, item_id) in &col_item_ids {
+            let value_str = record.get(col_idx).unwrap_or("").trim();
             if value_str.is_empty() {
                 continue;
             }
@@ -426,7 +418,7 @@ pub async fn import_csv(
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            upsert_balance_log(pool, *item_id, log_date, cents).await?;
+            upsert_balance_log(pool, item_id, log_date, cents).await?;
         }
 
         rows_imported += 1;
