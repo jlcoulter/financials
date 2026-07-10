@@ -28,13 +28,18 @@ async fn main() -> anyhow::Result<()> {
 
     let key = axum_extra::extract::cookie::Key::generate();
     let state = AppState {
-        db,
+        db: db.clone(),
         key,
-        db_path,
-        config_dir,
+        db_path: db_path.clone(),
+        config_dir: config_dir.clone(),
     };
 
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "src/static".to_string());
+
+    // If backups are enabled, start litestream on startup
+    if let Err(e) = rust_web::models::backup::sync_litestream(&db, &db_path, &config_dir).await {
+        tracing::warn!("Failed to sync litestream on startup: {e:?}");
+    }
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     tracing::info!("listening on {}", listener.local_addr().unwrap());
