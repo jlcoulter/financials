@@ -2877,7 +2877,7 @@ pub async fn settings_backup_post(
 
     // If the config is enabled, sync litestream immediately
     if config.enabled
-        && let Err(e) = backup::sync_litestream(state.db(), &state.db_path, &state.config_dir)
+        && let Err(e) = backup::sync_litestream(state.db(), &state.db_path, &state.config_dir).await
     {
         tracing::error!("Failed to sync litestream after saving config: {e:?}");
     }
@@ -2890,7 +2890,7 @@ pub async fn settings_backup_enable(
     user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
     backup::set_enabled(state.db(), user.0, true).await?;
-    backup::sync_litestream(state.db(), &state.db_path, &state.config_dir)?;
+    backup::sync_litestream(state.db(), &state.db_path, &state.config_dir).await?;
     Ok(Redirect::to("/settings?enabled").into_response())
 }
 
@@ -2899,6 +2899,6 @@ pub async fn settings_backup_disable(
     user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
     backup::set_enabled(state.db(), user.0, false).await?;
-    backup::sync_litestream(state.db(), &state.db_path, &state.config_dir)?;
+    backup::sync_litestream(state.db(), &state.db_path, &state.config_dir).await?;
     Ok(Redirect::to("/settings?disabled").into_response())
 }
