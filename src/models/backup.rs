@@ -183,10 +183,8 @@ pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String 
 }
 
 /// Synchronize litestream config file with the database config.
-/// - If an enabled config exists: writes litestream.yml to the config dir.
-/// - If no enabled config: removes litestream.yml.
-///
-/// The litestream sidecar container watches this file and handles replication.
+/// - If an enabled config exists: writes litestream.yml and (re)starts litestream replicate.
+/// - If no enabled config: stops litestream and removes litestream.yml.
 pub async fn sync_litestream(
     pool: &SqlitePool,
     db_path: &str,
@@ -212,12 +210,13 @@ pub async fn sync_litestream(
             tracing::info!("Writing litestream config to {}", config_path);
             tracing::debug!("Litestream config:\n{}", yaml);
             std::fs::write(&config_path, &yaml).map_err(|e| AppError::Internal(e.into()))?;
-            tracing::info!(
-                "Litestream sidecar will detect the config change and start replicating"
-            );
+
+            // Try to start litestream replicate as a background process
+            start_litestream(&config_path);
         }
         None => {
-            tracing::info!("No enabled backup config — removing litestream config");
+            tracing::info!("No enabled backup config — stopping litestream and removing config");
+            stop_litestream();
             if Path::new(&config_path).exists() {
                 tracing::info!("Removing {}", config_path);
                 let _ = std::fs::remove_file(&config_path);
@@ -226,6 +225,47 @@ pub async fn sync_litestream(
     }
 
     Ok(())
+}
+
+/// Start litestream replicate as a background process.
+/// If litestream is not installed, logs a warning instead of failing.
+fn start_litestream(config_path: &str) {
+    // Kill any existing litestream process first
+    stop_litestream();
+
+    match tokio::process::Command::new("litestream")
+        .arg("replicate")
+        .arg("-config")
+        .arg(config_path)
+        .spawn()
+    {
+        Ok(child) => {
+            tracing::info!("Litestream process started (PID {:?})", child.id());
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Could not start litestream: {e}. \
+                 Install litestream or use the Docker sidecar for automatic backups."
+            );
+        }
+    }
+}
+
+/// Stop any running litestream replicate process.
+fn stop_litestream() {
+    match std::process::Command::new("pkill")
+        .args(["-f", "litestream replicate"])
+        .output()
+    {
+        Ok(output) => {
+            if output.status.success() {
+                tracing::info!("Stopped existing litestream process");
+            }
+        }
+        Err(_) => {
+            tracing::debug!("pkill not available or no litestream process found");
+        }
+    }
 }
 
 #[cfg(test)]
