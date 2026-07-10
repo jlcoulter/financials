@@ -2692,14 +2692,6 @@ pub async fn settings(
     let s3_style = if provider == "s3" { "" } else { "display:none" };
     let b2_style = if provider == "b2" { "" } else { "display:none" };
 
-    let flash = config.as_ref().map(|c| {
-        if c.enabled {
-            "Backups are active."
-        } else {
-            "Backups are paused."
-        }
-    });
-
     let provider_options = if provider == "s3" {
         maud::html! {
             option value="s3" selected { "Amazon S3 / S3-compatible" }
@@ -2728,10 +2720,6 @@ pub async fn settings(
             h2 { "Settings" }
             p { "Hello, " (username) }
 
-            @if let Some(msg) = flash {
-                div class="flash flash-info" { (msg) }
-            }
-
             div class="settings-tabs" {
                 button class="tab-btn active" data-tab="backup" { "Backup" }
             }
@@ -2739,6 +2727,22 @@ pub async fn settings(
             div id="backup" class="tab-content" {
                 h3 { "Database Backups" }
                 p { "Automatically back up your financial data to cloud storage. Choose a provider and enter your credentials." }
+
+                @if config.is_some() {
+                    div class="backup-status" {
+                        @if let Some(c) = &config {
+                            @if c.enabled {
+                                div class="flash flash-success" { "Backups are active" }
+                            } @else {
+                                div class="flash flash-warning" { "Backups are paused" }
+                            }
+                        }
+                        p class="backup-detail" {
+                            "Provider: " (match &config { Some(c) => c.provider.clone(), None => String::new() })
+                            " | Bucket: " (match &config { Some(c) => c.bucket.clone(), None => String::new() })
+                        }
+                    }
+                }
 
                 form action="/settings/backup" method="post" class="settings-form" {
                     label { "Provider"
@@ -2870,6 +2874,14 @@ pub async fn settings_backup_post(
     };
 
     backup::save_config(state.db(), user.0, &config).await?;
+
+    // If the config is enabled, sync litestream immediately
+    if config.enabled
+        && let Err(e) = backup::sync_litestream(state.db(), &state.db_path)
+    {
+        tracing::error!("Failed to sync litestream after saving config: {e:?}");
+    }
+
     Ok(Redirect::to("/settings?saved").into_response())
 }
 
@@ -2878,6 +2890,7 @@ pub async fn settings_backup_enable(
     user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
     backup::set_enabled(state.db(), user.0, true).await?;
+    backup::sync_litestream(state.db(), &state.db_path)?;
     Ok(Redirect::to("/settings?enabled").into_response())
 }
 
@@ -2886,5 +2899,6 @@ pub async fn settings_backup_disable(
     user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
     backup::set_enabled(state.db(), user.0, false).await?;
+    backup::sync_litestream(state.db(), &state.db_path)?;
     Ok(Redirect::to("/settings?disabled").into_response())
 }
