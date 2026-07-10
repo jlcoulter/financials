@@ -2239,11 +2239,13 @@ pub async fn portfolio_import_post(
                             div class="csv-mapping-row" style="margin: 0.5em 0; padding: 0.5em; border: 1px solid var(--border); border-radius: 4px;" {
                                 @let col_header = analysis.headers.get(col_idx).map(|s| s.as_str()).unwrap_or("");
                                 @let col_label = if col_header.is_empty() { format!("Column {}", col_idx + 1) } else { format!("Column {}: {}", col_idx + 1, col_header) };
+                                // Auto-match: if the column header matches an existing item name, select it by default
+                                @let matched_item_id = items.iter().find(|item| item.name.eq_ignore_ascii_case(col_header)).map(|item| item.item_id);
                                 strong { (col_label) }
                                 select name=(format!("col_{}", col_idx)) {
-                                    option value="skip" { "— Skip —" }
+                                    option value="skip" selected[matched_item_id.is_none()] { "— Skip —" }
                                     @for item in &items {
-                                        option value=(format!("existing:{}", item.item_id)) { "→ " (item.name) " (" (item.item_type) ")" }
+                                        option value=(format!("existing:{}", item.item_id)) selected[matched_item_id == Some(item.item_id)] { "→ " (item.name) " (" (item.item_type) ")" }
                                     }
                                     option value="new:asset" { "+ New Asset" }
                                     option value="new:cash" { "+ New Cash" }
