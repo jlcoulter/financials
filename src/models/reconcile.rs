@@ -467,3 +467,92 @@ fn subset_sum_of_size(items: &[&ReconciledTxn], target: i64, size: usize) -> Opt
     // Try skipping first
     subset_sum_of_size(&items[1..], target, size)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    fn txn(id: &str, amount: i64) -> ReconciledTxn {
+        ReconciledTxn {
+            txn_id: Uuid::parse_str(id).unwrap(),
+            session_id: Uuid::nil(),
+            date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+            amount,
+            vendor: "test".to_string(),
+            matched: false,
+        }
+    }
+
+    // ── find_subset_sum ──
+
+    #[test]
+    fn find_subset_sum_exact_single_match() {
+        // Single item matching target — not found (starts at len=2)
+        let t1 = txn("00000000-0000-0000-0000-000000000001", 100);
+        let items = [&t1];
+        assert_eq!(find_subset_sum(&items, 100, 4), None);
+    }
+
+    #[test]
+    fn find_subset_sum_two_item_match() {
+        let t1 = txn("00000000-0000-0000-0000-000000000001", 60);
+        let t2 = txn("00000000-0000-0000-0000-000000000002", 40);
+        let items = [&t1, &t2];
+        let result = find_subset_sum(&items, 100, 4);
+        assert!(result.is_some());
+        let ids = result.unwrap();
+        assert_eq!(ids.len(), 2);
+    }
+
+    #[test]
+    fn find_subset_sum_three_item_match() {
+        let t1 = txn("00000000-0000-0000-0000-000000000001", 50);
+        let t2 = txn("00000000-0000-0000-0000-000000000002", 30);
+        let t3 = txn("00000000-0000-0000-0000-000000000003", 20);
+        let items = [&t1, &t2, &t3];
+        let result = find_subset_sum(&items, 100, 4);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn find_subset_sum_no_match() {
+        let t1 = txn("00000000-0000-0000-0000-000000000001", 10);
+        let t2 = txn("00000000-0000-0000-0000-000000000002", 20);
+        let items = [&t1, &t2];
+        assert_eq!(find_subset_sum(&items, 100, 4), None);
+    }
+
+    #[test]
+    fn find_subset_sum_empty_items() {
+        let items: Vec<&ReconciledTxn> = vec![];
+        assert_eq!(find_subset_sum(&items, 50, 4), None);
+    }
+
+    #[test]
+    fn find_subset_sum_respects_max_len() {
+        // 5 items that sum to 100, but max_len=3 so no match
+        let t1 = txn("00000000-0000-0000-0000-000000000001", 20);
+        let t2 = txn("00000000-0000-0000-0000-000000000002", 20);
+        let t3 = txn("00000000-0000-0000-0000-000000000003", 20);
+        let t4 = txn("00000000-0000-0000-0000-000000000004", 20);
+        let t5 = txn("00000000-0000-0000-0000-000000000005", 20);
+        let items = [&t1, &t2, &t3, &t4, &t5];
+        assert_eq!(find_subset_sum(&items, 100, 3), None);
+    }
+
+    // ── subset_sum_of_size ──
+
+    #[test]
+    fn subset_sum_size_zero_target_zero() {
+        let items: Vec<&ReconciledTxn> = vec![];
+        let result = subset_sum_of_size(&items, 0, 0);
+        assert_eq!(result, Some(vec![]));
+    }
+
+    #[test]
+    fn subset_sum_size_zero_target_nonzero() {
+        let items: Vec<&ReconciledTxn> = vec![];
+        assert_eq!(subset_sum_of_size(&items, 100, 0), None);
+    }
+}
