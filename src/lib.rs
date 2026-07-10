@@ -20,6 +20,7 @@ pub struct AppState {
     pub db: SqlitePool,
     pub key: Key,
     pub db_path: String,
+    pub config_dir: String,
 }
 
 impl AppState {

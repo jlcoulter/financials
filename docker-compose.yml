@@ -1,0 +1,30 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - data:/data
+      - config:/config
+    environment:
+      - DATABASE_URL=sqlite:///data/data.db
+      - DB_PATH=/data/data.db
+      - CONFIG_DIR=/config
+      - STATIC_DIR=/app/static
+      - RUST_LOG=rust_web=debug
+    restart: unless-stopped
+
+  litestream:
+    image: litestream/litestream:0.3
+    volumes:
+      - data:/data
+      - config:/config
+      - ./litestream-sidecar.sh:/bin/sidecar.sh:ro
+    entrypoint: ["/bin/sh", "/bin/sidecar.sh"]
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  data:
+  config:
