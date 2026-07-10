@@ -140,9 +140,13 @@ pub async fn set_enabled(pool: &SqlitePool, user_id: Uuid, enabled: bool) -> Res
 
 /// Generate a litestream YAML config from the stored backup config.
 ///
+/// Uses litestream's expanded replica format (type, bucket, path, etc.)
+/// rather than URL format — the URL format doesn't reliably pass auth
+/// credentials to the S3 client.
+///
 /// B2 uses the S3-compatible API — litestream does not support `b2://` URLs.
-/// B2 configs generate an `s3://` URL with the B2 endpoint and use the
-/// B2 key ID / application key as access_key_id / secret_access_key.
+/// B2 configs use `type: s3` with the B2 S3 endpoint and B2 key ID /
+/// application key as access-key-id / secret-access-key.
 pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String {
     let mut yaml = String::new();
     yaml.push_str("dbs:\n");
@@ -157,52 +161,54 @@ pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String 
                 .as_deref()
                 .unwrap_or("s3.us-west-004.backblazeb2.com");
 
-            let bucket_and_path = if config.path.is_empty() {
-                config.bucket.clone()
+            yaml.push_str("      - type: s3\n");
+            yaml.push_str(&format!("        bucket: {}\n", config.bucket));
+            if !config.path.is_empty() {
+                yaml.push_str(&format!(
+                    "        path: {}\n",
+                    config.path.trim_end_matches('/')
+                ));
+            }
+            // Ensure endpoint has https:// prefix
+            if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
+                yaml.push_str(&format!("        endpoint: {}\n", endpoint));
             } else {
-                format!("{}/{}", config.bucket, config.path.trim_end_matches('/'))
-            };
-
+                yaml.push_str(&format!("        endpoint: https://{}\n", endpoint));
+            }
+            yaml.push_str(&format!("        region: {}\n", config.region));
             yaml.push_str(&format!(
-                "      - url: s3://{}?endpoint={}&region={}\n",
-                bucket_and_path, endpoint, config.region
-            ));
-            yaml.push_str("        auth:\n");
-            yaml.push_str(&format!(
-                "          access_key_id: {}\n",
+                "        access-key-id: {}\n",
                 config.b2_key_id.as_deref().unwrap_or("")
             ));
             yaml.push_str(&format!(
-                "          secret_access_key: {}\n",
+                "        secret-access-key: {}\n",
                 config.b2_application_key.as_deref().unwrap_or("")
             ));
         }
         _ => {
             // S3 or other S3-compatible storage
-            let bucket_and_path = if config.path.is_empty() {
-                config.bucket.clone()
-            } else {
-                format!("{}/{}", config.bucket, config.path.trim_end_matches('/'))
-            };
-
-            if let Some(endpoint) = &config.endpoint {
+            yaml.push_str("      - type: s3\n");
+            yaml.push_str(&format!("        bucket: {}\n", config.bucket));
+            if !config.path.is_empty() {
                 yaml.push_str(&format!(
-                    "      - url: s3://{}?endpoint={}&region={}\n",
-                    bucket_and_path, endpoint, config.region
-                ));
-            } else {
-                yaml.push_str(&format!(
-                    "      - url: s3://{}?region={}\n",
-                    bucket_and_path, config.region
+                    "        path: {}\n",
+                    config.path.trim_end_matches('/')
                 ));
             }
-            yaml.push_str("        auth:\n");
+            if let Some(endpoint) = &config.endpoint {
+                if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
+                    yaml.push_str(&format!("        endpoint: {}\n", endpoint));
+                } else {
+                    yaml.push_str(&format!("        endpoint: https://{}\n", endpoint));
+                }
+            }
+            yaml.push_str(&format!("        region: {}\n", config.region));
             yaml.push_str(&format!(
-                "          access_key_id: {}\n",
+                "        access-key-id: {}\n",
                 config.access_key_id.as_deref().unwrap_or("")
             ));
             yaml.push_str(&format!(
-                "          secret_access_key: {}\n",
+                "        secret-access-key: {}\n",
                 config.secret_access_key.as_deref().unwrap_or("")
             ));
         }
@@ -342,11 +348,12 @@ mod tests {
         let config = make_s3_config();
         let yaml = generate_litestream_yaml("/data/financials.db", &config);
         assert!(yaml.contains("path: /data/financials.db"));
-        assert!(yaml.contains("s3://my-bucket/db-backups?region=us-east-1"));
-        assert!(yaml.contains("access_key_id: AKIA123"));
-        assert!(yaml.contains("secret_access_key: secret456"));
-        // Path should be in the URL, not a separate field
-        assert!(!yaml.contains("        path:"));
+        assert!(yaml.contains("type: s3"));
+        assert!(yaml.contains("bucket: my-bucket"));
+        assert!(yaml.contains("path: db-backups"));
+        assert!(yaml.contains("region: us-east-1"));
+        assert!(yaml.contains("access-key-id: AKIA123"));
+        assert!(yaml.contains("secret-access-key: secret456"));
     }
 
     #[test]
@@ -354,7 +361,8 @@ mod tests {
         let mut config = make_s3_config();
         config.path = String::new();
         let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("s3://my-bucket?region=us-east-1"));
+        assert!(yaml.contains("bucket: my-bucket"));
+        assert!(!yaml.contains("        path:"));
     }
 
     #[test]
@@ -362,21 +370,21 @@ mod tests {
         let mut config = make_s3_config();
         config.endpoint = Some("https://minio.example.com".to_string());
         let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains(
-            "s3://my-bucket/db-backups?endpoint=https://minio.example.com&region=us-east-1"
-        ));
+        assert!(yaml.contains("endpoint: https://minio.example.com"));
+        assert!(yaml.contains("region: us-east-1"));
     }
 
     #[test]
     fn litestream_yaml_b2_uses_s3_protocol() {
         let config = make_b2_config();
         let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        // B2 must use s3:// URL with B2 S3-compatible endpoint
-        assert!(
-            yaml.contains("s3://my-b2-bucket/db-backups?endpoint=s3.us-west-004.backblazeb2.com")
-        );
-        assert!(yaml.contains("access_key_id: b2-key-id"));
-        assert!(yaml.contains("secret_access_key: b2-app-key"));
+        // B2 uses S3-compatible expanded format
+        assert!(yaml.contains("type: s3"));
+        assert!(yaml.contains("bucket: my-b2-bucket"));
+        assert!(yaml.contains("path: db-backups"));
+        assert!(yaml.contains("endpoint: https://s3.us-west-004.backblazeb2.com"));
+        assert!(yaml.contains("access-key-id: b2-key-id"));
+        assert!(yaml.contains("secret-access-key: b2-app-key"));
         // Must NOT use b2:// URLs — litestream doesn't support them
         assert!(!yaml.contains("b2://"));
     }
@@ -386,7 +394,7 @@ mod tests {
         let mut config = make_b2_config();
         config.b2_endpoint = Some("s3.eu-central-003.backblazeb2.com".to_string());
         let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("endpoint=s3.eu-central-003.backblazeb2.com"));
+        assert!(yaml.contains("endpoint: https://s3.eu-central-003.backblazeb2.com"));
     }
 
     #[test]
@@ -394,7 +402,9 @@ mod tests {
         let mut config = make_b2_config();
         config.path = String::new();
         let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("s3://my-b2-bucket?endpoint=s3.us-west-004.backblazeb2.com"));
+        assert!(yaml.contains("bucket: my-b2-bucket"));
+        // No path prefix should be emitted when path is empty
+        assert!(!yaml.contains("        path:"));
     }
 
     #[test]
@@ -403,7 +413,7 @@ mod tests {
         config.access_key_id = None;
         config.secret_access_key = None;
         let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("access_key_id: "));
-        assert!(yaml.contains("secret_access_key: "));
+        assert!(yaml.contains("access-key-id: "));
+        assert!(yaml.contains("secret-access-key: "));
     }
 }
