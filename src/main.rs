@@ -17,24 +17,34 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let connection_string = "sqlite://data.db";
-    let db_path = "data.db".to_string();
-    let options = SqliteConnectOptions::from_str(connection_string)?.create_if_missing(true);
+    let connection_string =
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://data.db".to_string());
+    let db_path = std::env::var("DB_PATH").unwrap_or_else(|_| "data.db".to_string());
+    let config_dir = std::env::var("CONFIG_DIR").unwrap_or_else(|_| ".".to_string());
+    tracing::info!("database: {connection_string}, db_path: {db_path}, config_dir: {config_dir}");
+    let options = SqliteConnectOptions::from_str(&connection_string)?.create_if_missing(true);
     let db = SqlitePool::connect_with(options).await?;
     sqlx::migrate!().run(&db).await?;
 
     let key = axum_extra::extract::cookie::Key::generate();
-    let state = AppState { db, key, db_path };
+    let state = AppState {
+        db,
+        key,
+        db_path,
+        config_dir,
+    };
+
+    let static_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "src/static".to_string());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     tracing::info!("listening on {}", listener.local_addr().unwrap());
 
-    axum::serve(listener, app(state)).await?;
+    axum::serve(listener, app(state, static_dir)).await?;
 
     Ok(())
 }
 
-fn app(state: AppState) -> Router {
+fn app(state: AppState, static_dir: String) -> Router {
     Router::new()
         .route("/", axum::routing::get(pages::hello))
         .route("/time", axum::routing::get(pages::time))
@@ -177,7 +187,7 @@ fn app(state: AppState) -> Router {
             "/reconcile/{id}/reject",
             axum::routing::post(pages::reject_proposal),
         )
-        .nest_service("/static", ServeDir::new("src/static"))
+        .nest_service("/static", ServeDir::new(static_dir))
         .fallback(pages::not_found)
         .with_state(state)
 }

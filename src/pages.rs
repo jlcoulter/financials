@@ -2726,7 +2726,7 @@ pub async fn settings(
 
             div id="backup" class="tab-content" {
                 h3 { "Database Backups" }
-                p { "Automatically back up your financial data to cloud storage. Choose a provider and enter your credentials." }
+                p { "Automatically back up your financial data to cloud storage. Choose a provider and enter your credentials. When enabled, a litestream sidecar will continuously replicate your database to the configured bucket." }
 
                 @if config.is_some() {
                     div class="backup-status" {
@@ -2877,7 +2877,7 @@ pub async fn settings_backup_post(
 
     // If the config is enabled, sync litestream immediately
     if config.enabled
-        && let Err(e) = backup::sync_litestream(state.db(), &state.db_path)
+        && let Err(e) = backup::sync_litestream(state.db(), &state.db_path, &state.config_dir)
     {
         tracing::error!("Failed to sync litestream after saving config: {e:?}");
     }
@@ -2890,7 +2890,7 @@ pub async fn settings_backup_enable(
     user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
     backup::set_enabled(state.db(), user.0, true).await?;
-    backup::sync_litestream(state.db(), &state.db_path)?;
+    backup::sync_litestream(state.db(), &state.db_path, &state.config_dir)?;
     Ok(Redirect::to("/settings?enabled").into_response())
 }
 
@@ -2899,6 +2899,6 @@ pub async fn settings_backup_disable(
     user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
     backup::set_enabled(state.db(), user.0, false).await?;
-    backup::sync_litestream(state.db(), &state.db_path)?;
+    backup::sync_litestream(state.db(), &state.db_path, &state.config_dir)?;
     Ok(Redirect::to("/settings?disabled").into_response())
 }

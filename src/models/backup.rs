@@ -182,10 +182,12 @@ pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String 
     yaml
 }
 
-/// Synchronize litestream state with the database config.
-/// - If an enabled config exists: writes the YAML config file and (re)starts litestream replicate.
-/// - If no enabled config: stops litestream and removes the config file.
-pub fn sync_litestream(pool: &SqlitePool, db_path: &str) -> Result<(), AppError> {
+/// Synchronize litestream config file with the database config.
+/// - If an enabled config exists: writes litestream.yml to the config dir.
+/// - If no enabled config: removes litestream.yml.
+///
+/// The litestream sidecar container watches this file and handles replication.
+pub fn sync_litestream(pool: &SqlitePool, db_path: &str, config_dir: &str) -> Result<(), AppError> {
     // Find any enabled config — single-user app, so user_id doesn't matter
     let rt = tokio::runtime::Handle::current();
     let user_id: Option<Uuid> = rt.block_on(async {
@@ -197,7 +199,7 @@ pub fn sync_litestream(pool: &SqlitePool, db_path: &str) -> Result<(), AppError>
         Ok::<Option<Uuid>, AppError>(row.map(|(id,)| Uuid::parse_str(&id).unwrap_or_default()))
     })?;
 
-    let config_path = "litestream.yml";
+    let config_path = format!("{config_dir}/litestream.yml");
 
     match user_id {
         Some(uid) => {
@@ -209,62 +211,21 @@ pub fn sync_litestream(pool: &SqlitePool, db_path: &str) -> Result<(), AppError>
             let yaml = generate_litestream_yaml(db_path, &config);
             tracing::info!("Writing litestream config to {}", config_path);
             tracing::debug!("Litestream config:\n{}", yaml);
-            std::fs::write(config_path, &yaml).map_err(|e| AppError::Internal(e.into()))?;
-
-            // Kill any existing litestream process
-            stop_litestream();
-
-            // Start litestream replicate
-            tracing::info!("Starting litestream replicate with config {}", config_path);
-            match std::process::Command::new("litestream")
-                .arg("replicate")
-                .arg("-config")
-                .arg(config_path)
-                .spawn()
-            {
-                Ok(child) => {
-                    tracing::info!("Litestream process started (PID {})", child.id());
-                }
-                Err(e) => {
-                    tracing::error!("Failed to start litestream: {e}");
-                    return Err(AppError::Internal(anyhow::anyhow!(
-                        "Failed to start litestream: {e}. Is litestream installed and on PATH?"
-                    )));
-                }
-            }
+            std::fs::write(&config_path, &yaml).map_err(|e| AppError::Internal(e.into()))?;
+            tracing::info!(
+                "Litestream sidecar will detect the config change and start replicating"
+            );
         }
         None => {
-            tracing::info!("No enabled backup config — stopping litestream");
-            stop_litestream();
-
-            if Path::new(config_path).exists() {
-                tracing::info!("Removing litestream config file");
-                let _ = std::fs::remove_file(config_path);
+            tracing::info!("No enabled backup config — removing litestream config");
+            if Path::new(&config_path).exists() {
+                tracing::info!("Removing {}", config_path);
+                let _ = std::fs::remove_file(&config_path);
             }
         }
     }
 
     Ok(())
-}
-
-/// Stop any running litestream process by sending SIGTERM.
-fn stop_litestream() {
-    // Find and kill litestream processes we spawned
-    match std::process::Command::new("pkill")
-        .args(["-f", "litestream replicate"])
-        .output()
-    {
-        Ok(output) => {
-            if output.status.success() {
-                tracing::info!("Stopped litestream process");
-            } else {
-                tracing::debug!("No litestream process found to stop");
-            }
-        }
-        Err(e) => {
-            tracing::warn!("Failed to stop litestream: {e}");
-        }
-    }
 }
 
 #[cfg(test)]
