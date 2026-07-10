@@ -15,6 +15,7 @@ pub struct BackupConfig {
     pub secret_access_key: Option<String>,
     pub b2_key_id: Option<String>,
     pub b2_application_key: Option<String>,
+    pub b2_endpoint: Option<String>,
     pub enabled: bool,
 }
 
@@ -22,8 +23,8 @@ pub async fn get_config(
     pool: &SqlitePool,
     user_id: Uuid,
 ) -> Result<Option<BackupConfig>, AppError> {
-    let row = sqlx::query_as::<_, (String, String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool)>(
-        "SELECT id, provider, bucket, path, region, endpoint, access_key_id, secret_access_key, b2_key_id, b2_application_key, enabled FROM backup_config WHERE user_id = ?",
+    let row = sqlx::query_as::<_, (String, String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool)>(
+        "SELECT id, provider, bucket, path, region, endpoint, access_key_id, secret_access_key, b2_key_id, b2_application_key, b2_endpoint, enabled FROM backup_config WHERE user_id = ?",
     )
     .bind(user_id.to_string())
     .fetch_optional(pool)
@@ -41,6 +42,7 @@ pub async fn get_config(
             secret_access_key,
             b2_key_id,
             b2_application_key,
+            b2_endpoint,
             enabled,
         )) => {
             let id = Uuid::parse_str(&id_str)?;
@@ -56,6 +58,7 @@ pub async fn get_config(
                 secret_access_key,
                 b2_key_id,
                 b2_application_key,
+                b2_endpoint,
                 enabled,
             }))
         }
@@ -77,7 +80,7 @@ pub async fn save_config(
         sqlx::query(
             "UPDATE backup_config SET provider = ?, bucket = ?, path = ?, region = ?, endpoint = ?, \
              access_key_id = ?, secret_access_key = ?, b2_key_id = ?, b2_application_key = ?, \
-             enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+             b2_endpoint = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
         )
         .bind(&config.provider)
         .bind(&config.bucket)
@@ -88,6 +91,7 @@ pub async fn save_config(
         .bind(&config.secret_access_key)
         .bind(&config.b2_key_id)
         .bind(&config.b2_application_key)
+        .bind(&config.b2_endpoint)
         .bind(config.enabled)
         .bind(user_id.to_string())
         .execute(pool)
@@ -96,8 +100,8 @@ pub async fn save_config(
         let id = Uuid::now_v7();
         sqlx::query(
             "INSERT INTO backup_config (id, user_id, provider, bucket, path, region, endpoint, \
-             access_key_id, secret_access_key, b2_key_id, b2_application_key, enabled) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             access_key_id, secret_access_key, b2_key_id, b2_application_key, b2_endpoint, enabled) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id.to_string())
         .bind(user_id.to_string())
@@ -110,6 +114,7 @@ pub async fn save_config(
         .bind(&config.secret_access_key)
         .bind(&config.b2_key_id)
         .bind(&config.b2_application_key)
+        .bind(&config.b2_endpoint)
         .bind(config.enabled)
         .execute(pool)
         .await?;
@@ -134,37 +139,46 @@ pub async fn set_enabled(pool: &SqlitePool, user_id: Uuid, enabled: bool) -> Res
 }
 
 /// Generate a litestream YAML config from the stored backup config.
+///
+/// B2 uses the S3-compatible API — litestream does not support `b2://` URLs.
+/// B2 configs generate an `s3://` URL with the B2 endpoint and use the
+/// B2 key ID / application key as access_key_id / secret_access_key.
 pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String {
     let mut yaml = String::new();
     yaml.push_str("dbs:\n");
     yaml.push_str(&format!("  - path: {}\n", db_path));
     yaml.push_str("    replicas:\n");
-    yaml.push_str("      - url: ");
 
     match config.provider.as_str() {
         "b2" => {
-            // Path prefix goes in the URL for B2: b2://bucket/path
-            if config.path.is_empty() {
-                yaml.push_str(&format!("b2://{}\n", config.bucket));
+            // B2 uses S3-compatible API in litestream
+            let endpoint = config
+                .b2_endpoint
+                .as_deref()
+                .unwrap_or("s3.us-west-004.backblazeb2.com");
+
+            let bucket_and_path = if config.path.is_empty() {
+                config.bucket.clone()
             } else {
-                yaml.push_str(&format!(
-                    "b2://{}/{}\n",
-                    config.bucket,
-                    config.path.trim_end_matches('/')
-                ));
-            }
+                format!("{}/{}", config.bucket, config.path.trim_end_matches('/'))
+            };
+
+            yaml.push_str(&format!(
+                "      - url: s3://{}?endpoint={}&region={}\n",
+                bucket_and_path, endpoint, config.region
+            ));
             yaml.push_str("        auth:\n");
             yaml.push_str(&format!(
-                "          account_id: {}\n",
+                "          access_key_id: {}\n",
                 config.b2_key_id.as_deref().unwrap_or("")
             ));
             yaml.push_str(&format!(
-                "          application_key: {}\n",
+                "          secret_access_key: {}\n",
                 config.b2_application_key.as_deref().unwrap_or("")
             ));
         }
         _ => {
-            // Path prefix goes in the URL for S3: s3://bucket/path
+            // S3 or other S3-compatible storage
             let bucket_and_path = if config.path.is_empty() {
                 config.bucket.clone()
             } else {
@@ -173,12 +187,12 @@ pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String 
 
             if let Some(endpoint) = &config.endpoint {
                 yaml.push_str(&format!(
-                    "s3://{}?endpoint={}&region={}\n",
+                    "      - url: s3://{}?endpoint={}&region={}\n",
                     bucket_and_path, endpoint, config.region
                 ));
             } else {
                 yaml.push_str(&format!(
-                    "s3://{}?region={}\n",
+                    "      - url: s3://{}?region={}\n",
                     bucket_and_path, config.region
                 ));
             }
@@ -300,6 +314,7 @@ mod tests {
             secret_access_key: Some("secret456".to_string()),
             b2_key_id: None,
             b2_application_key: None,
+            b2_endpoint: None,
             enabled: true,
         }
     }
@@ -317,6 +332,7 @@ mod tests {
             secret_access_key: None,
             b2_key_id: Some("b2-key-id".to_string()),
             b2_application_key: Some("b2-app-key".to_string()),
+            b2_endpoint: None, // will default to s3.us-west-004.backblazeb2.com
             enabled: true,
         }
     }
@@ -352,15 +368,25 @@ mod tests {
     }
 
     #[test]
-    fn litestream_yaml_b2() {
+    fn litestream_yaml_b2_uses_s3_protocol() {
         let config = make_b2_config();
         let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("b2://my-b2-bucket/db-backups"));
-        assert!(yaml.contains("account_id: b2-key-id"));
-        assert!(yaml.contains("application_key: b2-app-key"));
-        assert!(!yaml.contains("s3://"));
-        // Path should be in the URL, not a separate field
-        assert!(!yaml.contains("        path:"));
+        // B2 must use s3:// URL with B2 S3-compatible endpoint
+        assert!(
+            yaml.contains("s3://my-b2-bucket/db-backups?endpoint=s3.us-west-004.backblazeb2.com")
+        );
+        assert!(yaml.contains("access_key_id: b2-key-id"));
+        assert!(yaml.contains("secret_access_key: b2-app-key"));
+        // Must NOT use b2:// URLs — litestream doesn't support them
+        assert!(!yaml.contains("b2://"));
+    }
+
+    #[test]
+    fn litestream_yaml_b2_custom_endpoint() {
+        let mut config = make_b2_config();
+        config.b2_endpoint = Some("s3.eu-central-003.backblazeb2.com".to_string());
+        let yaml = generate_litestream_yaml("/data/financials.db", &config);
+        assert!(yaml.contains("endpoint=s3.eu-central-003.backblazeb2.com"));
     }
 
     #[test]
@@ -368,7 +394,7 @@ mod tests {
         let mut config = make_b2_config();
         config.path = String::new();
         let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("b2://my-b2-bucket\n"));
+        assert!(yaml.contains("s3://my-b2-bucket?endpoint=s3.us-west-004.backblazeb2.com"));
     }
 
     #[test]
