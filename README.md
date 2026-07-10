@@ -7,7 +7,7 @@ Personal finance app for reconciling transactions and tracking net worth over ti
 Two core functions:
 
 1. Transaction reconciliation — upload outgoing and reconciled (bank) transactions via CSV, auto-match by amount, manually confirm or reject proposals, and track which items still need matching.
-2. Wealth tracking — log balances across assets, debts, and investments to see how your position changes over time.
+2. Wealth tracking — log balances across assets, debts, and investments to see how your position changes over time. Supports CSV import/export with per-column mapping.
 
 Work in progress.
 
@@ -32,10 +32,10 @@ src/
   auth.rs        signup/login/logout handlers
   cookies.rs     cookie helpers, LoggedInUser extractor
   layout.rs      HTML layout wrapper
-  pages.rs       page handlers
+  pages.rs       page handlers (including CSV import/export)
   models/
     user.rs      user DB queries
-    portfolio.rs portfolio + wealth item queries
+    portfolio.rs portfolio + wealth item queries + CSV import
     reconcile.rs reconciliation DB queries + auto-match
     csv_import.rs CSV column detection + parsing
   utils.rs       parse_dollars, format_cents
