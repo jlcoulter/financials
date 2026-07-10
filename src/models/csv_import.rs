@@ -99,7 +99,7 @@ pub fn analyze_csv(raw: &str) -> Result<CsvAnalysis, AppError> {
         .map(|col| {
             let score = sample_rows
                 .iter()
-                .filter(|row| row.get(col).map_or(false, |v| try_parse_date(v).is_some()))
+                .filter(|row| row.get(col).is_some_and(|v| try_parse_date(v).is_some()))
                 .count();
             (col, score)
         })
@@ -109,7 +109,7 @@ pub fn analyze_csv(raw: &str) -> Result<CsvAnalysis, AppError> {
         .map(|col| {
             let score = sample_rows
                 .iter()
-                .filter(|row| row.get(col).map_or(false, |v| looks_like_amount(v)))
+                .filter(|row| row.get(col).is_some_and(|v| looks_like_amount(v)))
                 .count();
             (col, score)
         })
@@ -163,11 +163,11 @@ pub fn analyze_csv(raw: &str) -> Result<CsvAnalysis, AppError> {
     }
 
     // Pick best date column
-    date_scores.sort_by(|a, b| b.1.cmp(&a.1));
+    date_scores.sort_by_key(|b| std::cmp::Reverse(b.1));
     let date_col = date_scores[0].0;
 
     // Pick best amount column (different from date column)
-    amount_scores.sort_by(|a, b| b.1.cmp(&a.1));
+    amount_scores.sort_by_key(|b| std::cmp::Reverse(b.1));
     let amount_col = amount_scores
         .iter()
         .find(|(col, _)| *col != date_col)
@@ -179,7 +179,7 @@ pub fn analyze_csv(raw: &str) -> Result<CsvAnalysis, AppError> {
         .iter()
         .filter_map(|row| row.get(date_col).and_then(|v| try_parse_date(v)))
         .next()
-        .unwrap_or_else(|| "%Y-%m-%d".to_string());
+        .unwrap_or_else(|| "%d/%m/%Y".to_string());
 
     // Detect vendor column: look for header match or pick the first text-heavy column that
     // isn't date or amount
@@ -208,7 +208,7 @@ pub fn analyze_csv(raw: &str) -> Result<CsvAnalysis, AppError> {
             let text_count = sample_rows
                 .iter()
                 .filter(|row| {
-                    row.get(col).map_or(false, |v| {
+                    row.get(col).is_some_and(|v| {
                         !v.trim().is_empty() && !looks_like_amount(v) && try_parse_date(v).is_none()
                     })
                 })

@@ -5,13 +5,16 @@ use uuid::Uuid;
 
 // ── Structs ──
 
+#[allow(dead_code)]
 pub struct ReconcileSession {
     pub session_id: Uuid,
     pub name: String,
 }
 
+#[allow(dead_code)]
 pub struct OutgoingTxn {
     pub txn_id: Uuid,
+    #[allow(dead_code)]
     pub session_id: Uuid,
     pub date: NaiveDate,
     pub amount: i64,
@@ -19,8 +22,10 @@ pub struct OutgoingTxn {
     pub matched: bool,
 }
 
+#[allow(dead_code)]
 pub struct ReconciledTxn {
     pub txn_id: Uuid,
+    #[allow(dead_code)]
     pub session_id: Uuid,
     pub date: NaiveDate,
     pub amount: i64,
@@ -387,7 +392,7 @@ pub async fn auto_match(
         .iter()
         .filter(|o| !o.matched && !skip_ids.contains(&o.txn_id))
         .collect();
-    unmatched_outgoing.sort_by(|a, b| b.amount.cmp(&a.amount));
+    unmatched_outgoing.sort_by_key(|b| std::cmp::Reverse(b.amount));
     let unmatched_reconciled: Vec<&ReconciledTxn> =
         reconciled.iter().filter(|r| !r.matched).collect();
 

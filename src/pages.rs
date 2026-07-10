@@ -173,10 +173,17 @@ pub async fn portfolios(
     ))
 }
 
+#[derive(serde::Deserialize, Default)]
+pub struct PortfolioQuery {
+    pub flash: Option<String>,
+    pub flash_type: Option<String>,
+}
+
 pub async fn portfolio(
     Path(portfolio_id): Path<Uuid>,
     State(state): State<AppState>,
     user: LoggedInUser,
+    axum::extract::Query(query): axum::extract::Query<PortfolioQuery>,
 ) -> Result<maud::Markup, AppError> {
     let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
     let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
@@ -186,7 +193,14 @@ pub async fn portfolio(
     Ok(layout(
         &format!("portfolio - {}", name),
         maud::html! {
-            a href="/portfolios" { "<- Back" }
+            a href="/portfolios" { "← Back" }
+            @if let Some(msg) = &query.flash {
+                div class=(if query.flash_type.as_deref() == Some("success") { "flash-success" } else if query.flash_type.as_deref() == Some("error") { "flash-error" } else { "flash-info" }) { (msg) }
+            }
+            div style="margin: 0.5em 0; display: flex; gap: 0.5em;" {
+                a href=(format!("/portfolio/{}/import", portfolio_id)) class="btn" { "Import CSV" }
+                a href=(format!("/portfolio/{}/export/csv", portfolio_id)) class="btn btn-ghost" { "Export CSV" }
+            }
             form method="post" action=(format!("/portfolio/{}/rename", portfolio_id)) class="portfolio-name-form" {
                 input type="text" name="name" value=(name)
                        class="portfolio-name-input"
@@ -305,10 +319,7 @@ pub async fn portfolio(
                             }
                             @for row in &grid_rows {
                                 @let total: i64 = row.values.iter().enumerate()
-                                    .filter_map(|(i, v)| match v {
-                                        Some(val) => Some(if items[i].item_type == "debt" { -*val } else { *val }),
-                                        None => None,
-                                    })
+                                    .filter_map(|(i, v)| v.as_ref().map(|val| if items[i].item_type == "debt" { -*val } else { *val }))
                                     .sum();
                                 tr id=(format!("row-{}", row.date)) {
                                     td id=(format!("date-{}", row.date)) class="editable date-cell" tabindex="0"
@@ -369,15 +380,15 @@ pub async fn add_balance(
     let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
     for item in &items {
         let key = format!("balance_{}", item.item_id);
-        if let Some(value) = form.get(&key) {
-            if let Ok(cents) = utils::parse_dollars(value) {
-                portfolio::insert_balance_log(state.db(), item.item_id, log_date, cents).await?;
-            }
+        if let Some(value) = form.get(&key)
+            && let Ok(cents) = utils::parse_dollars(value)
+        {
+            portfolio::insert_balance_log(state.db(), item.item_id, log_date, cents).await?;
         }
     }
 
     // Build the values for this date
-    let item_index: std::collections::HashMap<Uuid, usize> = items
+    let _item_index: std::collections::HashMap<Uuid, usize> = items
         .iter()
         .enumerate()
         .map(|(i, wi)| (wi.item_id, i))
@@ -396,13 +407,14 @@ pub async fn add_balance(
     let total: i64 = values
         .iter()
         .enumerate()
-        .filter_map(|(i, v)| match v {
-            Some(val) => Some(if items[i].item_type == "debt" {
-                -*val
-            } else {
-                *val
-            }),
-            None => None,
+        .filter_map(|(i, v)| {
+            v.as_ref().map(|val| {
+                if items[i].item_type == "debt" {
+                    -*val
+                } else {
+                    *val
+                }
+            })
         })
         .sum();
 
@@ -625,13 +637,14 @@ fn render_data_row_inner(
     let total: i64 = values
         .iter()
         .enumerate()
-        .filter_map(|(i, v)| match v {
-            Some(val) => Some(if items[i].item_type == "debt" {
-                -*val
-            } else {
-                *val
-            }),
-            None => None,
+        .filter_map(|(i, v)| {
+            v.as_ref().map(|val| {
+                if items[i].item_type == "debt" {
+                    -*val
+                } else {
+                    *val
+                }
+            })
         })
         .sum();
 
@@ -1753,12 +1766,11 @@ pub async fn confirm_all_proposals(
     let body_str = String::from_utf8_lossy(&body);
     let mut skip_ids: Vec<Uuid> = Vec::new();
     for pair in body_str.split('&') {
-        if let Some((key, val)) = pair.split_once('=') {
-            if key == "skip_ids" {
-                if let Ok(id) = val.parse() {
-                    skip_ids.push(id);
-                }
-            }
+        if let Some((key, val)) = pair.split_once('=')
+            && key == "skip_ids"
+            && let Ok(id) = val.parse()
+        {
+            skip_ids.push(id);
         }
     }
     let proposals = reconcile::auto_match(state.db(), session_id, &skip_ids).await?;
@@ -1833,7 +1845,7 @@ pub async fn upload_outgoing_csv(
     Path(session_id): Path<Uuid>,
     State(state): State<AppState>,
     user: LoggedInUser,
-    mut multipart: axum::extract::Multipart,
+    multipart: axum::extract::Multipart,
 ) -> Result<maud::Markup, AppError> {
     upload_csv(session_id, state, user, multipart, "outgoing").await
 }
@@ -1842,7 +1854,7 @@ pub async fn upload_reconciled_csv(
     Path(session_id): Path<Uuid>,
     State(state): State<AppState>,
     user: LoggedInUser,
-    mut multipart: axum::extract::Multipart,
+    multipart: axum::extract::Multipart,
 ) -> Result<maud::Markup, AppError> {
     upload_csv(session_id, state, user, multipart, "reconciled").await
 }
@@ -1952,7 +1964,7 @@ async fn upload_csv(
 
                             label { "Date format" }
                             select name="date_format" {
-                                @for fmt in &["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%m/%d/%y", "%d/%m/%y", "%Y/%m/%d", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y"] {
+                                @for fmt in &["%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y"] {
                                     option value=(fmt) selected[*fmt == analysis.detected.date_format] { (fmt) }
                                 }
                             }
@@ -2073,6 +2085,373 @@ fn urldecode(s: &str) -> String {
 
 pub async fn time(State(_state): State<AppState>) -> impl IntoResponse {
     maud::html! { p { "Time: " (chrono::Local::now().format("%H:%M:%S")) } }
+}
+
+// ── Portfolio CSV Import/Export ──
+
+pub async fn portfolio_import(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<maud::Markup, AppError> {
+    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    Ok(layout(
+        &format!("Import CSV — {}", name),
+        maud::html! {
+            a href=(format!("/portfolio/{}", portfolio_id)) { "← Back" }
+            h2 { "Import CSV into " (name) }
+
+            div class="csv-import-help" {
+                h3 { "How it works" }
+                ol {
+                    li { "Upload a CSV file." }
+                    li { "Preview the data and map each column to a date, an existing wealth item, or a new item." }
+                    li { "Choose the type for any new items (asset, cash, debt, investment)." }
+                    li { "Values are upserted — existing entries for the same date/item are updated." }
+                }
+            }
+
+            form method="post" action=(format!("/portfolio/{}/import", portfolio_id))
+                  enctype="multipart/form-data"
+                  class="add-item-form" {
+                label { "CSV File"
+                    input type="file" name="csv_file" accept=".csv,.txt" required {}
+                }
+                button type="submit" class="btn" { "Upload & Preview" }
+                " "
+                a href=(format!("/portfolio/{}", portfolio_id)) class="btn btn-ghost" { "Cancel" }
+            }
+        },
+        Some(&user),
+    ))
+}
+
+pub async fn portfolio_import_post(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    mut multipart: axum::extract::Multipart,
+) -> Result<maud::Markup, AppError> {
+    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+
+    let mut csv_data = String::new();
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("Failed to read multipart field: {}", e)))?
+    {
+        if field.name() == Some("csv_file") {
+            let bytes = field
+                .bytes()
+                .await
+                .map_err(|e| AppError::BadRequest(format!("Failed to read file: {}", e)))?;
+            csv_data = String::from_utf8(bytes.to_vec())
+                .map_err(|e| AppError::BadRequest(format!("File is not valid UTF-8: {}", e)))?;
+        }
+    }
+
+    if csv_data.is_empty() {
+        return Err(AppError::BadRequest("No CSV file provided".into()));
+    }
+
+    // Analyze the CSV
+    let analysis = crate::models::csv_import::analyze_csv(&csv_data)?;
+
+    // Save to temp file for confirm step
+    let tmp_id = uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+    let tmp_path = format!(
+        "/tmp/financials_portfolio_csv_{}_{}.csv",
+        portfolio_id, tmp_id
+    );
+    std::fs::write(&tmp_path, &csv_data)
+        .map_err(|e| AppError::BadRequest(format!("Failed to save CSV: {}", e)))?;
+
+    // Load existing wealth items for mapping
+    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+
+    let num_cols = analysis.preview_rows.first().map(|r| r.len()).unwrap_or(0);
+    let col_numbers: Vec<usize> = (0..num_cols).collect();
+
+    // Detect which column looks like a date
+    let date_col = analysis.detected.date_col;
+
+    Ok(layout(
+        &format!("Map Columns — {}", name),
+        maud::html! {
+            a href=(format!("/portfolio/{}", portfolio_id)) { "← Back" }
+            h2 { "Map Columns" }
+            p { (format!("Detected {} rows, {} columns. Map each column below.", analysis.total_rows, num_cols)) }
+
+            div class="csv-preview" {
+                h3 { "Preview (first 5 rows)" }
+                table class="csv-preview-table" {
+                    thead {
+                        tr class="csv-col-numbers" {
+                            @for i in 0..num_cols {
+                                th { (i + 1) }
+                            }
+                        }
+                        tr {
+                            @if !analysis.headers.is_empty() {
+                                @for h in &analysis.headers {
+                                    th { (h) }
+                                }
+                            } @else {
+                                @for i in 0..num_cols {
+                                    th { (format!("Col {}", i + 1)) }
+                                }
+                            }
+                        }
+                    }
+                    tbody {
+                        @for row in &analysis.preview_rows {
+                            tr {
+                                @for cell in row {
+                                    td { (cell) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            form method="post" action=(format!("/portfolio/{}/import/confirm", portfolio_id)) {
+                input type="hidden" name="tmp_id" value=(tmp_id) {}
+
+                div class="csv-mapping" {
+                    h3 { "Column Mapping" }
+
+                    label { "Date column" }
+                    select name="date_col" {
+                        @for (i, _label) in col_numbers.iter().enumerate() {
+                            option value=(i) selected[i == date_col] { (format!("Column {}", i + 1)) }
+                        }
+                    }
+
+                    label { "Date format" }
+                    select name="date_format" {
+                        @for fmt in &["%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y"] {
+                            option value=(fmt) selected[*fmt == analysis.detected.date_format] { (fmt) }
+                        }
+                    }
+
+                    @for col_idx in 0..num_cols {
+                        @if col_idx == date_col {
+                            // Skip date column in item mapping — it's handled above
+                        } @else {
+                            div class="csv-mapping-row" style="margin: 0.5em 0; padding: 0.5em; border: 1px solid var(--border); border-radius: 4px;" {
+                                @let col_header = analysis.headers.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+                                @let col_label = if col_header.is_empty() { format!("Column {}", col_idx + 1) } else { format!("Column {}: {}", col_idx + 1, col_header) };
+                                // Auto-match: if the column header matches an existing item name, select it by default
+                                @let matched_item_id = items.iter().find(|item| item.name.eq_ignore_ascii_case(col_header)).map(|item| item.item_id);
+                                strong { (col_label) }
+                                select name=(format!("col_{}", col_idx)) {
+                                    option value="skip" selected[matched_item_id.is_none()] { "— Skip —" }
+                                    @for item in &items {
+                                        option value=(format!("existing:{}", item.item_id)) selected[matched_item_id == Some(item.item_id)] { "→ " (item.name) " (" (item.item_type) ")" }
+                                    }
+                                    option value="new:asset" { "+ New Asset" }
+                                    option value="new:cash" { "+ New Cash" }
+                                    option value="new:investment" { "+ New Investment" }
+                                    option value="new:debt" { "+ New Debt" }
+                                }
+                                @if !col_header.is_empty() {
+                                    input type="text" name=(format!("col_{}_name", col_idx)) placeholder="Item name (defaults to column header)" value=(col_header) style="margin-left: 0.5em; width: 12em;" {}
+                                } @else {
+                                    input type="text" name=(format!("col_{}_name", col_idx)) placeholder="Item name (required for new items)" style="margin-left: 0.5em; width: 12em;" {}
+                                }
+                            }
+                        }
+                    }
+                }
+
+                button type="submit" class="btn" { "Import" }
+                " "
+                a href=(format!("/portfolio/{}", portfolio_id)) class="btn btn-ghost" { "Cancel" }
+            }
+        },
+        Some(&user),
+    ))
+}
+
+pub async fn portfolio_import_confirm(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    body: axum::body::Bytes,
+) -> Result<axum::response::Redirect, AppError> {
+    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+
+    let body_str = String::from_utf8_lossy(&body);
+    let mut tmp_id = String::new();
+    let mut date_col: usize = 0;
+    let mut date_format = "%d/%m/%Y".to_string();
+    let mut columns: std::collections::HashMap<usize, portfolio::ColumnTarget> =
+        std::collections::HashMap::new();
+
+    for pair in body_str.split('&') {
+        if let Some((key, val)) = pair.split_once('=') {
+            let key = urldecode(key);
+            let val = urldecode(val);
+            match key.as_str() {
+                "tmp_id" => tmp_id = val,
+                "date_col" => {
+                    date_col = val.parse().unwrap_or(0);
+                }
+                "date_format" => {
+                    if !val.is_empty() {
+                        date_format = val;
+                    }
+                }
+                key if key.starts_with("col_") && !key.ends_with("_name") => {
+                    if let Ok(col_idx) = key[4..].parse::<usize>() {
+                        if val == "skip" {
+                            columns.insert(col_idx, portfolio::ColumnTarget::Skip);
+                        } else if let Some(id) = val.strip_prefix("existing:") {
+                            columns
+                                .insert(col_idx, portfolio::ColumnTarget::Existing(id.to_string()));
+                        } else if let Some(type_str) = val.strip_prefix("new:") {
+                            // Name will come from the col_{idx}_name field
+                            // For now store a placeholder; we'll update below
+                            columns.insert(
+                                col_idx,
+                                portfolio::ColumnTarget::New {
+                                    name: String::new(), // placeholder
+                                    item_type: type_str.to_string(),
+                                },
+                            );
+                        }
+                    }
+                }
+                key if key.starts_with("col_") && key.ends_with("_name") => {
+                    // col_3_name → update the New item in column 3 with the actual name
+                    let col_str = &key[4..key.len() - 5]; // strip "col_" prefix and "_name" suffix
+                    if let Ok(col_idx) = col_str.parse::<usize>()
+                        && let Some(portfolio::ColumnTarget::New { name, .. }) =
+                            columns.get_mut(&col_idx)
+                        && !val.is_empty()
+                    {
+                        *name = val;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if tmp_id.is_empty() {
+        return Err(AppError::BadRequest("Missing upload reference".into()));
+    }
+
+    // Validate: any New targets must have a name
+    for (col_idx, target) in &columns {
+        if let portfolio::ColumnTarget::New { name, .. } = target
+            && name.is_empty()
+        {
+            return Err(AppError::BadRequest(format!(
+                "Column {} is set to create a new item but has no name",
+                col_idx + 1
+            )));
+        }
+    }
+
+    let tmp_path = format!(
+        "/tmp/financials_portfolio_csv_{}_{}.csv",
+        portfolio_id, tmp_id
+    );
+    let raw = std::fs::read_to_string(&tmp_path)
+        .map_err(|e| AppError::BadRequest(format!("CSV file not found: {}", e)))?;
+    let _ = std::fs::remove_file(&tmp_path); // Clean up
+
+    let mapping = portfolio::PortfolioColumnMapping {
+        date_col,
+        date_format,
+        columns,
+    };
+
+    let result = portfolio::import_csv(state.db(), portfolio_id, &raw, &mapping).await?;
+
+    let flash_msg = format!(
+        "Imported {} rows ({} skipped, {} items created)",
+        result.rows_imported, result.rows_skipped, result.items_created
+    );
+    let encoded = flash_msg
+        .replace(' ', "+")
+        .replace('%', "%25")
+        .replace('&', "%26");
+
+    Ok(axum::response::Redirect::to(&format!(
+        "/portfolio/{}?flash={}&flash_type=success",
+        portfolio_id, encoded
+    )))
+}
+
+pub async fn portfolio_csv(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<impl IntoResponse, AppError> {
+    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+
+    // Track which items are debts so we export them as negative
+    let debt_ids: std::collections::HashSet<Uuid> = items
+        .iter()
+        .filter(|wi| wi.item_type == "debt")
+        .map(|wi| wi.item_id)
+        .collect();
+
+    // Pivot: date -> item_id -> value
+    let mut dates: std::collections::BTreeMap<NaiveDate, std::collections::HashMap<Uuid, i64>> =
+        std::collections::BTreeMap::new();
+    for log in &logs {
+        dates
+            .entry(log.log_date)
+            .or_default()
+            .insert(log.item_id, log.balance_value);
+    }
+
+    let mut wtr = csv::Writer::from_writer(Vec::new());
+    // Header: Date,Item1,Item2,...
+    let mut header = vec!["Date".to_string()];
+    for item in &items {
+        header.push(item.name.clone());
+    }
+    wtr.write_record(&header)
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    for (date, values) in &dates {
+        let mut row = vec![date.to_string()];
+        for item in &items {
+            match values.get(&item.item_id) {
+                Some(cents) => {
+                    // Debts are stored positive internally; export as negative
+                    let value = if debt_ids.contains(&item.item_id) {
+                        -cents
+                    } else {
+                        *cents
+                    };
+                    row.push(utils::format_cents(value));
+                }
+                None => row.push(String::new()),
+            }
+        }
+        wtr.write_record(&row)
+            .map_err(|e| AppError::Internal(e.into()))?;
+    }
+
+    let data = wtr.into_inner().map_err(|e| AppError::Internal(e.into()))?;
+    let filename = format!("attachment; filename=\"{}.csv\"", name);
+
+    Ok((
+        [
+            ("content-type", "text/csv"),
+            ("content-disposition", filename.as_str()),
+        ],
+        data,
+    )
+        .into_response())
 }
 
 pub async fn not_found(State(_state): State<AppState>) -> impl IntoResponse {

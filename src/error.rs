@@ -3,6 +3,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
 
+#[derive(Debug)]
 pub enum AppError {
     Internal(anyhow::Error),
     BadRequest(String),
