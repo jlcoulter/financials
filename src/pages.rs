@@ -1966,7 +1966,7 @@ async fn upload_csv(
 
                             label { "Date format" }
                             select name="date_format" {
-                                @for fmt in &["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%m/%d/%y", "%d/%m/%y", "%Y/%m/%d", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y"] {
+                                @for fmt in &["%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y"] {
                                     option value=(fmt) selected[*fmt == analysis.detected.date_format] { (fmt) }
                                 }
                             }
@@ -2227,7 +2227,7 @@ pub async fn portfolio_import_post(
 
                     label { "Date format" }
                     select name="date_format" {
-                        @for fmt in &["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%m/%d/%y", "%d/%m/%y", "%Y/%m/%d", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y"] {
+                        @for fmt in &["%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y"] {
                             option value=(fmt) selected[*fmt == analysis.detected.date_format] { (fmt) }
                         }
                     }
@@ -2282,7 +2282,7 @@ pub async fn portfolio_import_confirm(
     let body_str = String::from_utf8_lossy(&body);
     let mut tmp_id = String::new();
     let mut date_col: usize = 0;
-    let mut date_format = "%Y-%m-%d".to_string();
+    let mut date_format = "%d/%m/%Y".to_string();
     let mut columns: std::collections::HashMap<usize, portfolio::ColumnTarget> = std::collections::HashMap::new();
 
     for pair in body_str.split('&') {

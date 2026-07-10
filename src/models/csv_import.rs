@@ -179,7 +179,7 @@ pub fn analyze_csv(raw: &str) -> Result<CsvAnalysis, AppError> {
         .iter()
         .filter_map(|row| row.get(date_col).and_then(|v| try_parse_date(v)))
         .next()
-        .unwrap_or_else(|| "%Y-%m-%d".to_string());
+        .unwrap_or_else(|| "%d/%m/%Y".to_string());
 
     // Detect vendor column: look for header match or pick the first text-heavy column that
     // isn't date or amount
