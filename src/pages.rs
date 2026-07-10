@@ -2747,13 +2747,14 @@ pub async fn settings(
                         }
                     }
 
+                    label { "Bucket Name"
+                        input type="text" name="bucket" value=(bucket) placeholder="my-backup-bucket";
+                    }
+                    label { "Backup Path Prefix"
+                        input type="text" name="path" value=(path) placeholder="financials-backups";
+                    }
+
                     div id="s3-fields" style=(s3_style) {
-                        label { "Bucket Name"
-                            input type="text" name="bucket" value=(bucket) placeholder="my-financials-backups";
-                        }
-                        label { "Backup Path Prefix"
-                            input type="text" name="path" value=(path) placeholder="financials-backups";
-                        }
                         label { "Region"
                             input type="text" name="region" value=(region) placeholder="us-east-1";
                         }
@@ -2769,12 +2770,6 @@ pub async fn settings(
                     }
 
                     div id="b2-fields" style=(b2_style) {
-                        label { "Bucket Name"
-                            input type="text" name="bucket" value=(bucket) placeholder="my-b2-bucket";
-                        }
-                        label { "Backup Path Prefix"
-                            input type="text" name="path" value=(path) placeholder="financials-backups";
-                        }
                         label { "Key ID"
                             input type="text" name="b2_key_id" value=(b2_key_id.unwrap_or_default()) autocomplete="off";
                         }
