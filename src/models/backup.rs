@@ -143,7 +143,16 @@ pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String 
 
     match config.provider.as_str() {
         "b2" => {
-            yaml.push_str(&format!("b2://{}\n", config.bucket));
+            // Path prefix goes in the URL for B2: b2://bucket/path
+            if config.path.is_empty() {
+                yaml.push_str(&format!("b2://{}\n", config.bucket));
+            } else {
+                yaml.push_str(&format!(
+                    "b2://{}/{}\n",
+                    config.bucket,
+                    config.path.trim_end_matches('/')
+                ));
+            }
             yaml.push_str("        auth:\n");
             yaml.push_str(&format!(
                 "          account_id: {}\n",
@@ -155,15 +164,22 @@ pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String 
             ));
         }
         _ => {
+            // Path prefix goes in the URL for S3: s3://bucket/path
+            let bucket_and_path = if config.path.is_empty() {
+                config.bucket.clone()
+            } else {
+                format!("{}/{}", config.bucket, config.path.trim_end_matches('/'))
+            };
+
             if let Some(endpoint) = &config.endpoint {
                 yaml.push_str(&format!(
                     "s3://{}?endpoint={}&region={}\n",
-                    config.bucket, endpoint, config.region
+                    bucket_and_path, endpoint, config.region
                 ));
             } else {
                 yaml.push_str(&format!(
                     "s3://{}?region={}\n",
-                    config.bucket, config.region
+                    bucket_and_path, config.region
                 ));
             }
             yaml.push_str("        auth:\n");
@@ -178,7 +194,6 @@ pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String 
         }
     }
 
-    yaml.push_str(&format!("        path: {}\n", config.path));
     yaml
 }
 
@@ -311,10 +326,19 @@ mod tests {
         let config = make_s3_config();
         let yaml = generate_litestream_yaml("/data/financials.db", &config);
         assert!(yaml.contains("path: /data/financials.db"));
-        assert!(yaml.contains("s3://my-bucket?region=us-east-1"));
+        assert!(yaml.contains("s3://my-bucket/db-backups?region=us-east-1"));
         assert!(yaml.contains("access_key_id: AKIA123"));
         assert!(yaml.contains("secret_access_key: secret456"));
-        assert!(yaml.contains("path: db-backups"));
+        // Path should be in the URL, not a separate field
+        assert!(!yaml.contains("        path:"));
+    }
+
+    #[test]
+    fn litestream_yaml_s3_no_path() {
+        let mut config = make_s3_config();
+        config.path = String::new();
+        let yaml = generate_litestream_yaml("/data/financials.db", &config);
+        assert!(yaml.contains("s3://my-bucket?region=us-east-1"));
     }
 
     #[test]
@@ -322,20 +346,29 @@ mod tests {
         let mut config = make_s3_config();
         config.endpoint = Some("https://minio.example.com".to_string());
         let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(
-            yaml.contains("s3://my-bucket?endpoint=https://minio.example.com&region=us-east-1")
-        );
+        assert!(yaml.contains(
+            "s3://my-bucket/db-backups?endpoint=https://minio.example.com&region=us-east-1"
+        ));
     }
 
     #[test]
     fn litestream_yaml_b2() {
         let config = make_b2_config();
         let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("b2://my-b2-bucket"));
+        assert!(yaml.contains("b2://my-b2-bucket/db-backups"));
         assert!(yaml.contains("account_id: b2-key-id"));
         assert!(yaml.contains("application_key: b2-app-key"));
-        assert!(yaml.contains("path: db-backups"));
         assert!(!yaml.contains("s3://"));
+        // Path should be in the URL, not a separate field
+        assert!(!yaml.contains("        path:"));
+    }
+
+    #[test]
+    fn litestream_yaml_b2_no_path() {
+        let mut config = make_b2_config();
+        config.path = String::new();
+        let yaml = generate_litestream_yaml("/data/financials.db", &config);
+        assert!(yaml.contains("b2://my-b2-bucket\n"));
     }
 
     #[test]
