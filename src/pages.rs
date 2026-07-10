@@ -2726,7 +2726,7 @@ pub async fn settings(
 
             div id="backup" class="tab-content" {
                 h3 { "Database Backups" }
-                p { "Automatically back up your financial data to cloud storage. Choose a provider and enter your credentials. When enabled, a litestream sidecar will continuously replicate your database to the configured bucket." }
+                p { "Automatically back up your financial data to cloud storage. Choose a provider and enter your credentials." }
 
                 @if config.is_some() {
                     div class="backup-status" {
