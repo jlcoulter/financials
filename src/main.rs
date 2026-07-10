@@ -71,6 +71,10 @@ fn app(state: AppState, static_dir: String) -> Router {
             "/settings/backup/disable",
             axum::routing::post(pages::settings_backup_disable),
         )
+        .route(
+            "/settings/backup/restore",
+            axum::routing::post(pages::settings_backup_restore),
+        )
         .route("/insights", axum::routing::get(pages::insights))
         .route("/insights/{id}", axum::routing::get(pages::insights_chart))
         .route("/logout", axum::routing::post(auth::logout_post))

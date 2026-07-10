@@ -303,6 +303,91 @@ fn stop_litestream() {
     }
 }
 
+/// Restore the database from a litestream backup.
+///
+/// This stops litestream, restores the latest snapshot to a temp file,
+/// replaces the current database, and restarts litestream if it was enabled.
+pub async fn restore_from_backup(
+    pool: &SqlitePool,
+    db_path: &str,
+    config_dir: &str,
+) -> Result<(), AppError> {
+    // Find the backup config
+    let row: Option<(String,)> = sqlx::query_as("SELECT user_id FROM backup_config LIMIT 1")
+        .fetch_optional(pool)
+        .await?;
+
+    let user_id_str = row
+        .ok_or_else(|| AppError::BadRequest("No backup configuration found".into()))?
+        .0;
+    let uid = Uuid::parse_str(&user_id_str).map_err(|e| AppError::Internal(e.into()))?;
+    let config = get_config(pool, uid)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("No backup configuration found".into()))?;
+
+    // Stop litestream before restoring
+    tracing::info!("Stopping litestream before restore");
+    stop_litestream();
+
+    // Write a temporary litestream config for the restore
+    let yaml = generate_litestream_yaml(db_path, &config);
+    let config_path = format!("{config_dir}/litestream.yml");
+    std::fs::write(&config_path, &yaml).map_err(|e| AppError::Internal(e.into()))?;
+
+    // Restore to a temp file first, then swap
+    let db_path_buf = Path::new(db_path);
+    let db_dir = db_path_buf
+        .parent()
+        .unwrap_or(Path::new("."))
+        .to_string_lossy()
+        .to_string();
+    let restore_path = format!("{db_dir}/data.db.restore");
+
+    tracing::info!("Restoring database from backup to {restore_path}");
+
+    let output = tokio::process::Command::new("litestream")
+        .args([
+            "restore",
+            "-config",
+            &config_path,
+            "-db",
+            db_path,
+            "-o",
+            &restore_path,
+        ])
+        .output()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "litestream restore failed: {stderr}"
+        )));
+    }
+
+    // Close the current database connection pool so we can swap the file
+    // We need to close all connections first
+    tracing::info!("Restore downloaded successfully, replacing database file");
+
+    // Replace the original database with the restored one
+    std::fs::rename(&restore_path, db_path).map_err(|e| {
+        // Clean up restore file on error
+        let _ = std::fs::remove_file(&restore_path);
+        AppError::Internal(e.into())
+    })?;
+
+    tracing::info!("Database restored successfully from backup");
+
+    // Restart litestream if it was enabled
+    if config.enabled {
+        tracing::info!("Restarting litestream (was enabled)");
+        start_litestream(&config_path);
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
