@@ -62,3 +62,28 @@ pub fn logout_cookie() -> Cookie<'static> {
         .max_age(time::Duration::ZERO)
         .build()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn login_cookie_has_correct_properties() {
+        let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let cookie = login_cookie(user_id);
+        assert_eq!(cookie.name_value().0, "user_id");
+        assert_eq!(cookie.name_value().1, user_id.to_string());
+        assert_eq!(cookie.path(), Some("/"));
+        assert!(cookie.http_only().unwrap_or(false));
+    }
+
+    #[test]
+    fn logout_cookie_has_zero_max_age() {
+        let cookie = logout_cookie();
+        assert_eq!(cookie.name_value().0, "user_id");
+        assert_eq!(cookie.name_value().1, "");
+        assert_eq!(cookie.path(), Some("/"));
+        assert_eq!(cookie.max_age(), Some(time::Duration::ZERO));
+    }
+}
