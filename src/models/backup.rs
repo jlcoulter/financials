@@ -182,3 +182,84 @@ pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String 
     yaml.push_str(&format!("        path: {}\n", config.path));
     yaml
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_s3_config() -> BackupConfig {
+        BackupConfig {
+            id: Uuid::nil(),
+            user_id: Uuid::nil(),
+            provider: "s3".to_string(),
+            bucket: "my-bucket".to_string(),
+            path: "db-backups".to_string(),
+            region: "us-east-1".to_string(),
+            endpoint: None,
+            access_key_id: Some("AKIA123".to_string()),
+            secret_access_key: Some("secret456".to_string()),
+            b2_key_id: None,
+            b2_application_key: None,
+            enabled: true,
+        }
+    }
+
+    fn make_b2_config() -> BackupConfig {
+        BackupConfig {
+            id: Uuid::nil(),
+            user_id: Uuid::nil(),
+            provider: "b2".to_string(),
+            bucket: "my-b2-bucket".to_string(),
+            path: "db-backups".to_string(),
+            region: "us-east-1".to_string(),
+            endpoint: None,
+            access_key_id: None,
+            secret_access_key: None,
+            b2_key_id: Some("b2-key-id".to_string()),
+            b2_application_key: Some("b2-app-key".to_string()),
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn litestream_yaml_s3_basic() {
+        let config = make_s3_config();
+        let yaml = generate_litestream_yaml("/data/financials.db", &config);
+        assert!(yaml.contains("path: /data/financials.db"));
+        assert!(yaml.contains("s3://my-bucket?region=us-east-1"));
+        assert!(yaml.contains("access_key_id: AKIA123"));
+        assert!(yaml.contains("secret_access_key: secret456"));
+        assert!(yaml.contains("path: db-backups"));
+    }
+
+    #[test]
+    fn litestream_yaml_s3_custom_endpoint() {
+        let mut config = make_s3_config();
+        config.endpoint = Some("https://minio.example.com".to_string());
+        let yaml = generate_litestream_yaml("/data/financials.db", &config);
+        assert!(
+            yaml.contains("s3://my-bucket?endpoint=https://minio.example.com&region=us-east-1")
+        );
+    }
+
+    #[test]
+    fn litestream_yaml_b2() {
+        let config = make_b2_config();
+        let yaml = generate_litestream_yaml("/data/financials.db", &config);
+        assert!(yaml.contains("b2://my-b2-bucket"));
+        assert!(yaml.contains("account_id: b2-key-id"));
+        assert!(yaml.contains("application_key: b2-app-key"));
+        assert!(yaml.contains("path: db-backups"));
+        assert!(!yaml.contains("s3://"));
+    }
+
+    #[test]
+    fn litestream_yaml_missing_credentials_default_to_empty() {
+        let mut config = make_s3_config();
+        config.access_key_id = None;
+        config.secret_access_key = None;
+        let yaml = generate_litestream_yaml("/data/financials.db", &config);
+        assert!(yaml.contains("access_key_id: "));
+        assert!(yaml.contains("secret_access_key: "));
+    }
+}
