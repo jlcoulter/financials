@@ -364,28 +364,32 @@ pub async fn import_csv(
         .map(|wi| (wi.item_id.to_string(), wi.item_id))
         .collect();
 
-    let mut col_item_ids: Vec<(usize, Uuid)> = Vec::new();
+    // (column_index, item_id, is_debt)
+    let mut col_items: Vec<(usize, Uuid, bool)> = Vec::new();
     let mut items_created = 0usize;
 
     for (&col_idx, target) in &mapping.columns {
         match target {
             ColumnTarget::Existing(id_str) => {
                 if let Some(&item_id) = existing_by_id.get(id_str) {
-                    col_item_ids.push((col_idx, item_id));
+                    let is_debt = existing_items
+                        .iter()
+                        .find(|wi| wi.item_id == item_id)
+                        .map(|wi| wi.item_type == "debt")
+                        .unwrap_or(false);
+                    col_items.push((col_idx, item_id, is_debt));
                 }
-                // else skip silently — bad ID
             }
             ColumnTarget::New { name, item_type } => {
-                // Check if an item with this name already exists
                 let existing = existing_items.iter().find(|wi| wi.name == *name);
-                let item_id = if let Some(wi) = existing {
-                    wi.item_id
+                let (item_id, is_debt) = if let Some(wi) = existing {
+                    (wi.item_id, wi.item_type == "debt")
                 } else {
                     let id = create_wealth_item(pool, portfolio_id, name, item_type).await?;
                     items_created += 1;
-                    id
+                    (id, item_type == "debt")
                 };
-                col_item_ids.push((col_idx, item_id));
+                col_items.push((col_idx, item_id, is_debt));
             }
             ColumnTarget::Skip => {}
         }
@@ -409,15 +413,19 @@ pub async fn import_csv(
             }
         };
 
-        for &(col_idx, item_id) in &col_item_ids {
+        for &(col_idx, item_id, is_debt) in &col_items {
             let value_str = record.get(col_idx).unwrap_or("").trim();
             if value_str.is_empty() {
                 continue;
             }
-            let cents = match utils::parse_dollars(value_str) {
+            let mut cents = match utils::parse_dollars(value_str) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
+            // Debts are stored as positive internally; flip negative CSV values
+            if is_debt && cents < 0 {
+                cents = cents.abs();
+            }
             upsert_balance_log(pool, item_id, log_date, cents).await?;
         }
 
