@@ -187,24 +187,24 @@ pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String 
 /// - If no enabled config: removes litestream.yml.
 ///
 /// The litestream sidecar container watches this file and handles replication.
-pub fn sync_litestream(pool: &SqlitePool, db_path: &str, config_dir: &str) -> Result<(), AppError> {
+pub async fn sync_litestream(
+    pool: &SqlitePool,
+    db_path: &str,
+    config_dir: &str,
+) -> Result<(), AppError> {
     // Find any enabled config — single-user app, so user_id doesn't matter
-    let rt = tokio::runtime::Handle::current();
-    let user_id: Option<Uuid> = rt.block_on(async {
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT user_id FROM backup_config WHERE enabled = 1 LIMIT 1")
-                .fetch_optional(pool)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?;
-        Ok::<Option<Uuid>, AppError>(row.map(|(id,)| Uuid::parse_str(&id).unwrap_or_default()))
-    })?;
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT user_id FROM backup_config WHERE enabled = 1 LIMIT 1")
+            .fetch_optional(pool)
+            .await?;
 
     let config_path = format!("{config_dir}/litestream.yml");
 
-    match user_id {
-        Some(uid) => {
-            let config = rt
-                .block_on(async { get_config(pool, uid).await })?
+    match row {
+        Some((user_id_str,)) => {
+            let uid = Uuid::parse_str(&user_id_str).map_err(|e| AppError::Internal(e.into()))?;
+            let config = get_config(pool, uid)
+                .await?
                 .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Config disappeared")))?;
 
             // Write litestream.yml
