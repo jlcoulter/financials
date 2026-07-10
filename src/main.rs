@@ -18,12 +18,13 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let connection_string = "sqlite://data.db";
+    let db_path = "data.db".to_string();
     let options = SqliteConnectOptions::from_str(connection_string)?.create_if_missing(true);
     let db = SqlitePool::connect_with(options).await?;
     sqlx::migrate!().run(&db).await?;
 
     let key = axum_extra::extract::cookie::Key::generate();
-    let state = AppState { db, key };
+    let state = AppState { db, key, db_path };
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     tracing::info!("listening on {}", listener.local_addr().unwrap());

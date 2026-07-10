@@ -19,6 +19,7 @@ use sqlx::SqlitePool;
 pub struct AppState {
     pub db: SqlitePool,
     pub key: Key,
+    pub db_path: String,
 }
 
 impl AppState {

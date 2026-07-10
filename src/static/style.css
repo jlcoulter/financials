@@ -927,6 +927,13 @@ th.th--debt {
     border-radius: 6px;
     margin: 0.5em 0;
 }
+.flash-warning {
+    background: #e65100;
+    color: white;
+    padding: 0.75em 1em;
+    border-radius: 6px;
+    margin: 0.5em 0;
+}
 
 /* CSV import help */
 .csv-import-help ol {
@@ -988,4 +995,15 @@ th.th--debt {
     display: flex;
     gap: 0.75em;
     margin-top: 1.5em;
+}
+.backup-status {
+    margin-bottom: 1.5em;
+    padding: 1em;
+    background: var(--bg-highlight, #2e3440);
+    border-radius: 6px;
+}
+.backup-detail {
+    margin: 0.5em 0 0;
+    color: var(--text-muted, #d8dee9);
+    font-size: 0.9rem;
 }
