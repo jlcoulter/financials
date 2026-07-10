@@ -2373,6 +2373,13 @@ pub async fn portfolio_csv(
     let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
     let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
 
+    // Track which items are debts so we export them as negative
+    let debt_ids: std::collections::HashSet<Uuid> = items
+        .iter()
+        .filter(|wi| wi.item_type == "debt")
+        .map(|wi| wi.item_id)
+        .collect();
+
     // Pivot: date -> item_id -> value
     let mut dates: std::collections::BTreeMap<NaiveDate, std::collections::HashMap<Uuid, i64>> =
         std::collections::BTreeMap::new();
@@ -2395,7 +2402,15 @@ pub async fn portfolio_csv(
         let mut row = vec![date.to_string()];
         for item in &items {
             match values.get(&item.item_id) {
-                Some(cents) => row.push(utils::format_cents(*cents)),
+                Some(cents) => {
+                    // Debts are stored positive internally; export as negative
+                    let value = if debt_ids.contains(&item.item_id) {
+                        -cents
+                    } else {
+                        *cents
+                    };
+                    row.push(utils::format_cents(value));
+                }
                 None => row.push(String::new()),
             }
         }
