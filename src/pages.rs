@@ -173,10 +173,17 @@ pub async fn portfolios(
     ))
 }
 
+#[derive(serde::Deserialize, Default)]
+pub struct PortfolioQuery {
+    pub flash: Option<String>,
+    pub flash_type: Option<String>,
+}
+
 pub async fn portfolio(
     Path(portfolio_id): Path<Uuid>,
     State(state): State<AppState>,
     user: LoggedInUser,
+    axum::extract::Query(query): axum::extract::Query<PortfolioQuery>,
 ) -> Result<maud::Markup, AppError> {
     let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
     let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
@@ -186,7 +193,14 @@ pub async fn portfolio(
     Ok(layout(
         &format!("portfolio - {}", name),
         maud::html! {
-            a href="/portfolios" { "<- Back" }
+            a href="/portfolios" { "← Back" }
+            @if let Some(msg) = &query.flash {
+                div class=(if query.flash_type.as_deref() == Some("success") { "flash-success" } else if query.flash_type.as_deref() == Some("error") { "flash-error" } else { "flash-info" }) { (msg) }
+            }
+            div style="margin: 0.5em 0; display: flex; gap: 0.5em;" {
+                a href=(format!("/portfolio/{}/import", portfolio_id)) class="btn" { "Import CSV" }
+                a href=(format!("/portfolio/{}/export/csv", portfolio_id)) class="btn btn-ghost" { "Export CSV" }
+            }
             form method="post" action=(format!("/portfolio/{}/rename", portfolio_id)) class="portfolio-name-form" {
                 input type="text" name="name" value=(name)
                        class="portfolio-name-input"
@@ -2073,6 +2087,187 @@ fn urldecode(s: &str) -> String {
 
 pub async fn time(State(_state): State<AppState>) -> impl IntoResponse {
     maud::html! { p { "Time: " (chrono::Local::now().format("%H:%M:%S")) } }
+}
+
+// ── Portfolio CSV Import/Export ──
+
+pub async fn portfolio_import(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<maud::Markup, AppError> {
+    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    Ok(layout(
+        &format!("Import CSV — {}", name),
+        maud::html! {
+            a href=(format!("/portfolio/{}", portfolio_id)) { "← Back" }
+            h2 { "Import CSV into " (name) }
+
+            div class="csv-import-help" {
+                h3 { "How it works" }
+                ol {
+                    li { "Upload a CSV file with " strong { "dates in column 1" } " and wealth item names as other column headers." }
+                    li { "Choose the default item type for newly created items." }
+                    li { "Existing items matching a column header will have their values upserted (updated or inserted)." }
+                    li { "Values support formats like " code { "$1,234.56" } ", " code { "1234.56" } ", " code { "-500" } "." }
+                }
+                h4 { "Example CSV" }
+                pre style="background:var(--bg-secondary);padding:1em;border-radius:8px;overflow-x:auto;font-size:0.9em;" {
+                    "Date,Savings,Checking,Mortgage\n2025-01-01,10000,5000,150000\n2025-02-01,10200,4800,148000"
+                }
+            }
+
+            form method="post" action=(format!("/portfolio/{}/import", portfolio_id))
+                  enctype="multipart/form-data"
+                  class="add-item-form" {
+                label { "CSV File"
+                    input type="file" name="csv_file" accept=".csv,.txt" required {}
+                }
+                label { "Default Item Type for new items"
+                    select name="default_type" {
+                        option value="asset" selected { "Asset" }
+                        option value="cash" { "Cash" }
+                        option value="investment" { "Investment" }
+                        option value="debt" { "Debt" }
+                    }
+                }
+                button type="submit" class="btn" { "Import CSV" }
+                " "
+                a href=(format!("/portfolio/{}", portfolio_id)) class="btn btn-ghost" { "Cancel" }
+            }
+        },
+        Some(&user),
+    ))
+}
+
+pub async fn portfolio_import_post(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    mut multipart: axum::extract::Multipart,
+) -> Result<axum::response::Redirect, AppError> {
+    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+
+    let mut csv_data = String::new();
+    let mut default_type = "asset".to_string();
+    let mut column_types: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        AppError::BadRequest(format!("Failed to read multipart field: {}", e))
+    })? {
+        let field_name = field.name().unwrap_or("").to_string();
+        match field_name.as_str() {
+            "csv_file" => {
+                let bytes = field.bytes().await.map_err(|e| {
+                    AppError::BadRequest(format!("Failed to read file: {}", e))
+                })?;
+                csv_data = String::from_utf8(bytes.to_vec()).map_err(|e| {
+                    AppError::BadRequest(format!("File is not valid UTF-8: {}", e))
+                })?;
+            }
+            "default_type" => {
+                let text = field.text().await.map_err(|e| {
+                    AppError::BadRequest(format!("Failed to read default_type: {}", e))
+                })?;
+                match text.as_str() {
+                    "asset" | "cash" | "investment" | "debt" => default_type = text,
+                    _ => return Err(AppError::BadRequest(format!("Invalid item type: {}", text))),
+                }
+            }
+            name if name.starts_with("column_") => {
+                let text = field.text().await.map_err(|e| {
+                    AppError::BadRequest(format!("Failed to read {}: {}", name, e))
+                })?;
+                if let Some(idx_str) = name.strip_prefix("column_") {
+                    if let Ok(idx) = idx_str.parse::<usize>() {
+                        match text.as_str() {
+                            "asset" | "cash" | "investment" | "debt" => {
+                                column_types.insert(idx, text);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if csv_data.is_empty() {
+        return Err(AppError::BadRequest("No CSV file provided".into()));
+    }
+
+    let result = portfolio::import_csv(
+        state.db(),
+        portfolio_id,
+        &csv_data,
+        &default_type,
+        &column_types,
+    )
+    .await?;
+
+    let flash_msg = format!(
+        "Imported {} rows ({} skipped, {} items created)",
+        result.rows_imported, result.rows_skipped, result.items_created
+    );
+    // Simple URL encoding for the flash message
+    let encoded = flash_msg.replace(' ', "+").replace('%', "%25").replace('&', "%26");
+
+    Ok(axum::response::Redirect::to(&format!(
+        "/portfolio/{}?flash={}&flash_type=success",
+        portfolio_id, encoded
+    )))
+}
+
+pub async fn portfolio_csv(
+    Path(portfolio_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<impl IntoResponse, AppError> {
+    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+
+    // Pivot: date -> item_id -> value
+    let mut dates: std::collections::BTreeMap<NaiveDate, std::collections::HashMap<Uuid, i64>> =
+        std::collections::BTreeMap::new();
+    for log in &logs {
+        dates
+            .entry(log.log_date)
+            .or_default()
+            .insert(log.item_id, log.balance_value);
+    }
+
+    let mut wtr = csv::Writer::from_writer(Vec::new());
+    // Header: Date,Item1,Item2,...
+    let mut header = vec!["Date".to_string()];
+    for item in &items {
+        header.push(item.name.clone());
+    }
+    wtr.write_record(&header).map_err(|e| AppError::Internal(e.into()))?;
+
+    for (date, values) in &dates {
+        let mut row = vec![date.to_string()];
+        for item in &items {
+            match values.get(&item.item_id) {
+                Some(cents) => row.push(utils::format_cents(*cents)),
+                None => row.push(String::new()),
+            }
+        }
+        wtr.write_record(&row).map_err(|e| AppError::Internal(e.into()))?;
+    }
+
+    let data = wtr.into_inner().map_err(|e| AppError::Internal(e.into()))?;
+    let filename = format!("attachment; filename=\"{}.csv\"", name);
+
+    Ok((
+        [
+            ("content-type", "text/csv"),
+            ("content-disposition", filename.as_str()),
+        ],
+        data,
+    )
+        .into_response())
 }
 
 pub async fn not_found(State(_state): State<AppState>) -> impl IntoResponse {
