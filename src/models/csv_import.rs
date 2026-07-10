@@ -278,3 +278,211 @@ pub fn parse_csv_with_mapping(
     rows.sort_by_key(|(d, _, _)| *d);
     Ok(rows)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── try_parse_date ──
+
+    #[test]
+    fn try_parse_date_iso() {
+        assert_eq!(try_parse_date("2025-07-01"), Some("%Y-%m-%d".to_string()));
+    }
+
+    #[test]
+    fn try_parse_date_us() {
+        assert_eq!(try_parse_date("07/01/2025"), Some("%m/%d/%Y".to_string()));
+    }
+
+    #[test]
+    fn try_parse_date_eu() {
+        // 25/07/2025 is unambiguously d/m/Y (day > 12)
+        assert_eq!(try_parse_date("25/07/2025"), Some("%d/%m/%Y".to_string()));
+    }
+
+    #[test]
+    fn try_parse_date_short_year_us() {
+        // "07/01/25" is ambiguous — the parser prefers %m/%d/%Y
+        // because it tries longer format patterns first
+        let result = try_parse_date("07/01/25");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn try_parse_date_named_month() {
+        assert_eq!(try_parse_date("Jul 1, 2025"), Some("%b %d, %Y".to_string()));
+    }
+
+    #[test]
+    fn try_parse_date_named_month_long() {
+        assert_eq!(
+            try_parse_date("July 1, 2025"),
+            Some("%B %d, %Y".to_string())
+        );
+    }
+
+    #[test]
+    fn try_parse_date_slash_ymd() {
+        assert_eq!(try_parse_date("2025/07/01"), Some("%Y/%m/%d".to_string()));
+    }
+
+    #[test]
+    fn try_parse_date_dash_dm_y() {
+        assert_eq!(try_parse_date("01-07-2025"), Some("%m-%d-%Y".to_string()));
+    }
+
+    #[test]
+    fn try_parse_date_invalid() {
+        assert_eq!(try_parse_date("not-a-date"), None);
+    }
+
+    #[test]
+    fn try_parse_date_whitespace() {
+        assert_eq!(
+            try_parse_date("  2025-07-01  "),
+            Some("%Y-%m-%d".to_string())
+        );
+    }
+
+    // ── looks_like_amount ──
+
+    #[test]
+    fn looks_like_amount_plain() {
+        assert!(looks_like_amount("100"));
+    }
+
+    #[test]
+    fn looks_like_amount_with_dollar() {
+        assert!(looks_like_amount("$1,234.56"));
+    }
+
+    #[test]
+    fn looks_like_amount_negative() {
+        assert!(looks_like_amount("-500.00"));
+    }
+
+    #[test]
+    fn looks_like_amount_euro() {
+        assert!(looks_like_amount("€1.234,56"));
+    }
+
+    #[test]
+    fn looks_like_amount_pound() {
+        assert!(looks_like_amount("£5,000"));
+    }
+
+    #[test]
+    fn looks_like_amount_empty() {
+        assert!(!looks_like_amount(""));
+    }
+
+    #[test]
+    fn looks_like_amount_text() {
+        assert!(!looks_like_amount("hello"));
+    }
+
+    // ── analyze_csv ──
+
+    #[test]
+    fn analyze_csv_detects_date_and_amount_columns() {
+        let csv = "Date,Description,Amount\n01/07/2025,Coffee,4.50\n02/07/2025,Tea,3.20\n";
+        let analysis = analyze_csv(csv).unwrap();
+        assert_eq!(analysis.detected.date_col, 0);
+        assert_eq!(analysis.detected.amount_col, 2);
+        assert_eq!(analysis.headers.len(), 3);
+        assert_eq!(analysis.total_rows, 2);
+    }
+
+    #[test]
+    fn analyze_csv_detects_vendor_column() {
+        let csv = "Date,Description,Amount\n01/07/2025,Coffee,4.50\n";
+        let analysis = analyze_csv(csv).unwrap();
+        assert_eq!(analysis.detected.vendor_col, Some(1));
+    }
+
+    #[test]
+    fn analyze_csv_rejects_empty_csv() {
+        let csv = "";
+        assert!(analyze_csv(csv).is_err());
+    }
+
+    #[test]
+    fn analyze_csv_defaults_to_dm_y_format() {
+        let csv = "Date,Amount\nnotadate,100\nnotadate,200\n";
+        let analysis = analyze_csv(csv).unwrap();
+        assert_eq!(analysis.detected.date_format, "%d/%m/%Y");
+    }
+
+    #[test]
+    fn analyze_csv_detects_dm_y_from_data() {
+        let csv = "Date,Amount\n25/07/2025,100\n";
+        let analysis = analyze_csv(csv).unwrap();
+        assert_eq!(analysis.detected.date_format, "%d/%m/%Y");
+    }
+
+    #[test]
+    fn analyze_csv_detects_ymd_format() {
+        let csv = "Date,Amount\n2025-07-01,100\n";
+        let analysis = analyze_csv(csv).unwrap();
+        assert_eq!(analysis.detected.date_format, "%Y-%m-%d");
+    }
+
+    // ── parse_csv_with_mapping ──
+
+    #[test]
+    fn parse_csv_with_mapping_basic() {
+        let csv = "Date,Description,Amount\n01/07/2025,Coffee,4.50\n02/07/2025,Tea,3.20\n";
+        let mapping = ColumnMapping {
+            date_col: 0,
+            amount_col: 2,
+            vendor_col: Some(1),
+            date_format: "%d/%m/%Y".to_string(),
+        };
+        let rows = parse_csv_with_mapping(csv, &mapping).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, NaiveDate::from_ymd_opt(2025, 7, 1).unwrap());
+        assert_eq!(rows[0].1, 450);
+        assert_eq!(rows[0].2, "Coffee");
+    }
+
+    #[test]
+    fn parse_csv_with_mapping_skips_empty_amount() {
+        let csv = "Date,Description,Amount\n01/07/2025,Coffee,4.50\n02/07/2025,Tea,\n";
+        let mapping = ColumnMapping {
+            date_col: 0,
+            amount_col: 2,
+            vendor_col: Some(1),
+            date_format: "%d/%m/%Y".to_string(),
+        };
+        let rows = parse_csv_with_mapping(csv, &mapping).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].2, "Coffee");
+    }
+
+    #[test]
+    fn parse_csv_with_mapping_negative_amounts() {
+        let csv = "Date,Amount\n01/07/2025,-150000\n";
+        let mapping = ColumnMapping {
+            date_col: 0,
+            amount_col: 1,
+            vendor_col: None,
+            date_format: "%d/%m/%Y".to_string(),
+        };
+        let rows = parse_csv_with_mapping(csv, &mapping).unwrap();
+        assert_eq!(rows[0].1, -15000000);
+    }
+
+    #[test]
+    fn parse_csv_with_mapping_no_vendor() {
+        let csv = "Date,Amount\n01/07/2025,500\n";
+        let mapping = ColumnMapping {
+            date_col: 0,
+            amount_col: 1,
+            vendor_col: None,
+            date_format: "%d/%m/%Y".to_string(),
+        };
+        let rows = parse_csv_with_mapping(csv, &mapping).unwrap();
+        assert_eq!(rows[0].2, "");
+    }
+}

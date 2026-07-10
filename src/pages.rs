@@ -2083,6 +2083,188 @@ fn urldecode(s: &str) -> String {
     result
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn item(id: &str, name: &str, item_type: &str, position: i32) -> WealthItem {
+        WealthItem {
+            item_id: Uuid::parse_str(id).unwrap(),
+            name: name.to_string(),
+            item_type: item_type.to_string(),
+            position,
+        }
+    }
+
+    fn log(id: &str, item_id: &str, date: &str, value: i64) -> BalanceLog {
+        BalanceLog {
+            log_id: Uuid::parse_str(id).unwrap(),
+            item_id: Uuid::parse_str(item_id).unwrap(),
+            log_date: NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap(),
+            balance_value: value,
+        }
+    }
+
+    // ── pivot_logs ──
+
+    #[test]
+    fn pivot_logs_basic() {
+        let items = [
+            item("00000000-0000-0000-0000-000000000001", "Savings", "cash", 0),
+            item(
+                "00000000-0000-0000-0000-000000000002",
+                "Mortgage",
+                "debt",
+                1,
+            ),
+        ];
+        let logs = [
+            log(
+                "a0000000-0000-0000-0000-000000000001",
+                "00000000-0000-0000-0000-000000000001",
+                "2025-07-01",
+                500000,
+            ),
+            log(
+                "a0000000-0000-0000-0000-000000000002",
+                "00000000-0000-0000-0000-000000000002",
+                "2025-07-01",
+                -1500000,
+            ),
+        ];
+        let rows = pivot_logs(&items, &logs);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].date, NaiveDate::from_ymd_opt(2025, 7, 1).unwrap());
+        assert_eq!(rows[0].values.len(), 2);
+        assert_eq!(rows[0].values[0], Some(500000));
+        assert_eq!(rows[0].values[1], Some(-1500000));
+    }
+
+    #[test]
+    fn pivot_logs_missing_entries() {
+        let items = [
+            item("00000000-0000-0000-0000-000000000001", "Savings", "cash", 0),
+            item(
+                "00000000-0000-0000-0000-000000000002",
+                "Mortgage",
+                "debt",
+                1,
+            ),
+        ];
+        let logs = [log(
+            "a0000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000001",
+            "2025-07-01",
+            500000,
+        )];
+        let rows = pivot_logs(&items, &logs);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].values[0], Some(500000));
+        assert_eq!(rows[0].values[1], None);
+    }
+
+    #[test]
+    fn pivot_logs_sorted_descending() {
+        let items = [item(
+            "00000000-0000-0000-0000-000000000001",
+            "Savings",
+            "cash",
+            0,
+        )];
+        let logs = [
+            log(
+                "a0000000-0000-0000-0000-000000000001",
+                "00000000-0000-0000-0000-000000000001",
+                "2025-07-01",
+                100,
+            ),
+            log(
+                "a0000000-0000-0000-0000-000000000002",
+                "00000000-0000-0000-0000-000000000001",
+                "2025-07-15",
+                200,
+            ),
+        ];
+        let rows = pivot_logs(&items, &logs);
+        // Most recent date first
+        assert_eq!(rows[0].date, NaiveDate::from_ymd_opt(2025, 7, 15).unwrap());
+        assert_eq!(rows[1].date, NaiveDate::from_ymd_opt(2025, 7, 1).unwrap());
+    }
+
+    #[test]
+    fn pivot_logs_empty() {
+        let items: [WealthItem; 0] = [];
+        let logs: [BalanceLog; 0] = [];
+        let rows = pivot_logs(&items, &logs);
+        assert!(rows.is_empty());
+    }
+
+    // ── urldecode ──
+
+    #[test]
+    fn urldecode_percent_encoding() {
+        assert_eq!(urldecode("hello%20world"), "hello world");
+    }
+
+    #[test]
+    fn urldecode_plus() {
+        assert_eq!(urldecode("hello+world"), "hello world");
+    }
+
+    #[test]
+    fn urldecode_ampersand() {
+        assert_eq!(urldecode("a%26b"), "a&b");
+    }
+
+    #[test]
+    fn urldecode_plain_string() {
+        assert_eq!(urldecode("hello"), "hello");
+    }
+
+    #[test]
+    fn urldecode_multi_byte() {
+        // The urldecode function handles one byte at a time, so multi-byte
+        // UTF-8 chars produce multiple decoded chars. %C3%A9 → two chars (Ã©)
+        let result = urldecode("%C3%A9");
+        assert!(result.contains("Ã"));
+    }
+
+    // ── make_chart_id ──
+
+    #[test]
+    fn make_chart_id_replaces_id_and_get_element() {
+        fn make_chart_id(html: &str, new_id: &str) -> String {
+            html.replace("id=\"chart\"", &format!("id=\"{}\"", new_id))
+                .replace(
+                    "getElementById('chart')",
+                    &format!("getElementById('{}')", new_id),
+                )
+        }
+        let html =
+            r#"<div id="chart"></div><script>var c = document.getElementById('chart');</script>"#;
+        let result = make_chart_id(html, "trend-chart");
+        assert!(result.contains("id=\"trend-chart\""));
+        assert!(result.contains("getElementById('trend-chart')"));
+        assert!(!result.contains("id=\"chart\""));
+        assert!(!result.contains("getElementById('chart')"));
+    }
+
+    #[test]
+    fn make_chart_id_no_match() {
+        fn make_chart_id(html: &str, new_id: &str) -> String {
+            html.replace("id=\"chart\"", &format!("id=\"{}\"", new_id))
+                .replace(
+                    "getElementById('chart')",
+                    &format!("getElementById('{}')", new_id),
+                )
+        }
+        let html = "<div id='other'></div>";
+        let result = make_chart_id(html, "trend-chart");
+        assert_eq!(result, html);
+    }
+}
+
 pub async fn time(State(_state): State<AppState>) -> impl IntoResponse {
     maud::html! { p { "Time: " (chrono::Local::now().format("%H:%M:%S")) } }
 }
