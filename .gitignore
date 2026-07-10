@@ -13,3 +13,5 @@ AGENTS.md
 .idea
 litestream.yml
 data.db-wal
+data.db-litestream/
+.data.db-litestream/
