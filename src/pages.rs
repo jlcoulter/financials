@@ -8,7 +8,7 @@ use crate::models::portfolio::{self, BalanceLog, WealthItem};
 use crate::models::reconcile::{self, OutgoingTxn, ReconciledTxn};
 use crate::models::user;
 use crate::utils;
-use axum::extract::{Form, Path, State};
+use axum::extract::{Form, Path, Query, State};
 use axum::response::IntoResponse;
 use axum::response::Redirect;
 use chrono::NaiveDate;
@@ -2659,11 +2659,14 @@ pub async fn not_found(State(_state): State<AppState>) -> impl IntoResponse {
 pub async fn settings(
     State(state): State<AppState>,
     user: LoggedInUser,
+    Query(params): Query<SettingsFlash>,
 ) -> Result<maud::Markup, AppError> {
     let config = backup::get_config(state.db(), user.0).await?;
     let username = user::get_username_by_id(state.db(), user.0)
         .await
         .unwrap_or_else(|_| "User".to_string());
+
+    let flash = params.flash.as_deref();
 
     let (provider, bucket, path, region, endpoint, access_key_id, b2_key_id, b2_endpoint, _enabled) =
         match &config {
@@ -2724,6 +2727,21 @@ pub async fn settings(
 
             div class="settings-tabs" {
                 button class="tab-btn active" data-tab="backup" { "Backup" }
+                button class="tab-btn" data-tab="restore" { "Restore" }
+            }
+
+            @if let Some(msg) = flash {
+                @if msg == "saved" {
+                    div class="flash flash-success" { "Configuration saved" }
+                } @else if msg == "enabled" {
+                    div class="flash flash-success" { "Backups enabled" }
+                } @else if msg == "disabled" {
+                    div class="flash flash-info" { "Backups paused" }
+                } @else if msg == "restored" {
+                    div class="flash flash-success" { "Database restored from backup" }
+                } @else if msg == "restore_failed" {
+                    div class="flash flash-error" { "Restore failed — check server logs for details" }
+                }
             }
 
             div id="backup" class="tab-content" {
@@ -2796,12 +2814,49 @@ pub async fn settings(
                 }
             }
 
+            div id="restore" class="tab-content" style="display:none" {
+                h3 { "Restore from Backup" }
+                p { "Restore your database from the latest litestream backup snapshot. \
+                     This will replace your current database with the backup version." }
+
+                @if config.is_some() {
+                    div class="backup-status" {
+                        p class="backup-detail" {
+                            "Will restore from: "
+                            (match &config { Some(c) => c.provider.clone(), None => String::new() })
+                            " | Bucket: "
+                            (match &config { Some(c) => c.bucket.clone(), None => String::new() })
+                        }
+                    }
+
+                    div class="flash flash-warning" {
+                        "Warning: This will replace your current database with the backup. \
+                         Any changes made since the last backup will be lost."
+                    }
+
+                    form action="/settings/backup/restore" method="post" class="settings-form" {
+                        div class="settings-actions" {
+                            button type="submit" class="btn btn-ghost" { "Restore from Backup" }
+                        }
+                    }
+                } @else {
+                    div class="flash flash-warning" {
+                        "No backup configuration found. Configure backups first."
+                    }
+                }
+            }
+
             script type="text/javascript" {
-                (maud::PreEscaped("document.getElementById('provider-select').addEventListener('change', function() { document.getElementById('s3-fields').style.display = this.value === 's3' ? '' : 'none'; document.getElementById('b2-fields').style.display = this.value === 'b2' ? '' : 'none'; });"))
+                (maud::PreEscaped("document.getElementById('provider-select').addEventListener('change', function() { document.getElementById('s3-fields').style.display = this.value === 's3' ? '' : 'none'; document.getElementById('b2-fields').style.display = this.value === 'b2' ? '' : 'none'; }); document.querySelectorAll('.tab-btn').forEach(function(btn) { btn.addEventListener('click', function() { document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); }); document.querySelectorAll('.tab-content').forEach(function(t) { t.style.display = 'none'; }); btn.classList.add('active'); document.getElementById(btn.dataset.tab).style.display = ''; }); });"))
             }
         },
         Some(&user),
     ))
+}
+
+#[derive(serde::Deserialize)]
+pub struct SettingsFlash {
+    pub flash: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -2891,7 +2946,7 @@ pub async fn settings_backup_post(
         tracing::error!("Failed to sync litestream after saving config: {e:?}");
     }
 
-    Ok(Redirect::to("/settings?saved").into_response())
+    Ok(Redirect::to("/settings?flash=saved").into_response())
 }
 
 pub async fn settings_backup_enable(
@@ -2900,7 +2955,7 @@ pub async fn settings_backup_enable(
 ) -> Result<axum::response::Response, AppError> {
     backup::set_enabled(state.db(), user.0, true).await?;
     backup::sync_litestream(state.db(), &state.db_path, &state.config_dir).await?;
-    Ok(Redirect::to("/settings?enabled").into_response())
+    Ok(Redirect::to("/settings?flash=enabled").into_response())
 }
 
 pub async fn settings_backup_disable(
@@ -2909,5 +2964,18 @@ pub async fn settings_backup_disable(
 ) -> Result<axum::response::Response, AppError> {
     backup::set_enabled(state.db(), user.0, false).await?;
     backup::sync_litestream(state.db(), &state.db_path, &state.config_dir).await?;
-    Ok(Redirect::to("/settings?disabled").into_response())
+    Ok(Redirect::to("/settings?flash=disabled").into_response())
+}
+
+pub async fn settings_backup_restore(
+    State(state): State<AppState>,
+    _user: LoggedInUser,
+) -> Result<axum::response::Response, AppError> {
+    match backup::restore_from_backup(state.db(), &state.db_path, &state.config_dir).await {
+        Ok(()) => Ok(Redirect::to("/settings?flash=restored").into_response()),
+        Err(e) => {
+            tracing::error!("Restore failed: {e:?}");
+            Ok(Redirect::to("/settings?flash=restore_failed").into_response())
+        }
+    }
 }
