@@ -1,4 +1,5 @@
 use crate::error::AppError;
+use crate::utils;
 use chrono::NaiveDate;
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -10,6 +11,7 @@ pub struct WealthItem {
     pub position: i32,
 }
 
+#[allow(dead_code)]
 pub struct BalanceLog {
     pub log_id: Uuid,
     pub item_id: Uuid,
@@ -244,7 +246,7 @@ pub async fn create_portfolio(
     name: &str,
 ) -> Result<Uuid, AppError> {
     let id = Uuid::now_v7();
-    let result =
+    let _result =
         sqlx::query("INSERT INTO portfolios (portfolio_id, user_id, name) VALUES (?, ?, ?)")
             .bind(id.to_string())
             .bind(user_id.to_string())
@@ -301,4 +303,136 @@ pub async fn rename_portfolio(
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// Result of a CSV import operation.
+pub struct ImportResult {
+    pub rows_imported: usize,
+    pub rows_skipped: usize,
+    pub items_created: usize,
+}
+
+/// How a single data column maps to a wealth item.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub enum ColumnTarget {
+    /// Map to an existing wealth item by its ID.
+    Existing(String),
+    /// Create a new wealth item with this name and type.
+    New { name: String, item_type: String },
+    /// Skip this column entirely.
+    Skip,
+}
+
+/// Column mapping for portfolio CSV import.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct PortfolioColumnMapping {
+    /// Which column index is the date (0-based).
+    pub date_col: usize,
+    /// Date format string for parsing.
+    pub date_format: String,
+    /// Mapping for each non-date column (by column index).
+    /// Key is the 0-based column index.
+    pub columns: std::collections::HashMap<usize, ColumnTarget>,
+}
+
+/// Import a CSV into a portfolio using explicit column mapping.
+///
+/// The caller provides which column is the date and what each other
+/// column maps to (existing item, new item, or skip).
+pub async fn import_csv(
+    pool: &SqlitePool,
+    portfolio_id: Uuid,
+    raw: &str,
+    mapping: &PortfolioColumnMapping,
+) -> Result<ImportResult, AppError> {
+    let mut reader = csv::ReaderBuilder::new()
+        .flexible(true)
+        .from_reader(raw.as_bytes());
+
+    let records: Vec<csv::StringRecord> = reader.records().filter_map(|r| r.ok()).collect();
+
+    if records.is_empty() {
+        return Err(AppError::BadRequest("CSV has no data rows".into()));
+    }
+
+    // Build ordered list of (column_index, item_id) for data columns that map to items
+    let existing_items = list_wealth_items(pool, portfolio_id).await?;
+    let existing_by_id: std::collections::HashMap<String, Uuid> = existing_items
+        .iter()
+        .map(|wi| (wi.item_id.to_string(), wi.item_id))
+        .collect();
+
+    // (column_index, item_id, is_debt)
+    let mut col_items: Vec<(usize, Uuid, bool)> = Vec::new();
+    let mut items_created = 0usize;
+
+    for (&col_idx, target) in &mapping.columns {
+        match target {
+            ColumnTarget::Existing(id_str) => {
+                if let Some(&item_id) = existing_by_id.get(id_str) {
+                    let is_debt = existing_items
+                        .iter()
+                        .find(|wi| wi.item_id == item_id)
+                        .map(|wi| wi.item_type == "debt")
+                        .unwrap_or(false);
+                    col_items.push((col_idx, item_id, is_debt));
+                }
+            }
+            ColumnTarget::New { name, item_type } => {
+                let existing = existing_items.iter().find(|wi| wi.name == *name);
+                let (item_id, is_debt) = if let Some(wi) = existing {
+                    (wi.item_id, wi.item_type == "debt")
+                } else {
+                    let id = create_wealth_item(pool, portfolio_id, name, item_type).await?;
+                    items_created += 1;
+                    (id, item_type == "debt")
+                };
+                col_items.push((col_idx, item_id, is_debt));
+            }
+            ColumnTarget::Skip => {}
+        }
+    }
+
+    let mut rows_imported = 0usize;
+    let mut rows_skipped = 0usize;
+
+    for record in &records {
+        let date_str = record.get(mapping.date_col).unwrap_or("").trim();
+        if date_str.is_empty() {
+            rows_skipped += 1;
+            continue;
+        }
+
+        let log_date = match NaiveDate::parse_from_str(date_str, &mapping.date_format) {
+            Ok(d) => d,
+            Err(_) => {
+                rows_skipped += 1;
+                continue;
+            }
+        };
+
+        for &(col_idx, item_id, is_debt) in &col_items {
+            let value_str = record.get(col_idx).unwrap_or("").trim();
+            if value_str.is_empty() {
+                continue;
+            }
+            let mut cents = match utils::parse_dollars(value_str) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            // Debts are stored as positive internally; flip negative CSV values
+            if is_debt && cents < 0 {
+                cents = cents.abs();
+            }
+            upsert_balance_log(pool, item_id, log_date, cents).await?;
+        }
+
+        rows_imported += 1;
+    }
+
+    Ok(ImportResult {
+        rows_imported,
+        rows_skipped,
+        items_created,
+    })
 }

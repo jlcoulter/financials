@@ -904,3 +904,34 @@ th.th--debt {
     padding: 0;
 }
 
+
+/* Flash messages */
+.flash-success {
+    background: #2e7d32;
+    color: white;
+    padding: 0.75em 1em;
+    border-radius: 6px;
+    margin: 0.5em 0;
+}
+.flash-error {
+    background: #c62828;
+    color: white;
+    padding: 0.75em 1em;
+    border-radius: 6px;
+    margin: 0.5em 0;
+}
+.flash-info {
+    background: #1565c0;
+    color: white;
+    padding: 0.75em 1em;
+    border-radius: 6px;
+    margin: 0.5em 0;
+}
+
+/* CSV import help */
+.csv-import-help ol {
+    padding-left: 1.5em;
+}
+.csv-import-help pre {
+    margin: 0.5em 0 1em;
+}

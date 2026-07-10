@@ -1,15 +1,11 @@
-mod auth;
-mod cookies;
-mod error;
-mod layout;
-mod models;
-mod pages;
-mod utils;
+use rust_web::AppState;
+use rust_web::auth;
+use rust_web::pages;
 use std::str::FromStr;
 
 use axum::Router;
-use axum_extra::extract::cookie::Key;
-use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
+use sqlx::SqlitePool;
+use sqlx::sqlite::SqliteConnectOptions;
 use tower_http::services::ServeDir;
 
 #[tokio::main]
@@ -26,8 +22,8 @@ async fn main() -> anyhow::Result<()> {
     let db = SqlitePool::connect_with(options).await?;
     sqlx::migrate!().run(&db).await?;
 
-    let key = Key::generate();
-    let state = crate::AppState { db, key };
+    let key = axum_extra::extract::cookie::Key::generate();
+    let state = AppState { db, key };
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     tracing::info!("listening on {}", listener.local_addr().unwrap());
@@ -35,18 +31,6 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app(state)).await?;
 
     Ok(())
-}
-
-#[derive(Clone)]
-pub struct AppState {
-    db: SqlitePool,
-    pub key: Key,
-}
-
-impl AppState {
-    pub fn db(&self) -> &SqlitePool {
-        &self.db
-    }
 }
 
 fn app(state: AppState) -> Router {
@@ -96,6 +80,22 @@ fn app(state: AppState) -> Router {
         .route(
             "/portfolio/{id}/delete-item",
             axum::routing::post(pages::delete_item),
+        )
+        .route(
+            "/portfolio/{id}/import",
+            axum::routing::get(pages::portfolio_import),
+        )
+        .route(
+            "/portfolio/{id}/import",
+            axum::routing::post(pages::portfolio_import_post),
+        )
+        .route(
+            "/portfolio/{id}/import/confirm",
+            axum::routing::post(pages::portfolio_import_confirm),
+        )
+        .route(
+            "/portfolio/{id}/export/csv",
+            axum::routing::get(pages::portfolio_csv),
         )
         .route("/reconcile", axum::routing::get(pages::reconcile_list))
         .route("/reconcile", axum::routing::post(pages::reconcile_create))
