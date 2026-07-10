@@ -1,4 +1,5 @@
 use crate::error::AppError;
+use crate::utils;
 use chrono::NaiveDate;
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -301,4 +302,139 @@ pub async fn rename_portfolio(
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// Result of a CSV import operation.
+pub struct ImportResult {
+    pub rows_imported: usize,
+    pub rows_skipped: usize,
+    pub items_created: usize,
+}
+
+/// Import a pivot-style CSV into a portfolio.
+///
+/// Format: first column is date, remaining columns are wealth item names.
+/// The header row defines which column maps to which item.
+/// Items that don't exist yet are created with `default_type`.
+/// Values are upserted (update if date+item already exists).
+pub async fn import_csv(
+    pool: &SqlitePool,
+    portfolio_id: Uuid,
+    raw: &str,
+    default_type: &str,
+    column_types: &std::collections::HashMap<usize, String>,
+) -> Result<ImportResult, AppError> {
+    let mut reader = csv::ReaderBuilder::new()
+        .flexible(true)
+        .from_reader(raw.as_bytes());
+
+    let headers = reader
+        .headers()
+        .map_err(|e| AppError::BadRequest(format!("Failed to read CSV headers: {}", e)))?
+        .clone();
+
+    if headers.is_empty() {
+        return Err(AppError::BadRequest("CSV file is empty".into()));
+    }
+
+    // Columns after the first are wealth item names
+    let item_columns: Vec<(String, String)> = headers
+        .iter()
+        .skip(1)
+        .enumerate()
+        .map(|(i, name)| {
+            let resolved_type = column_types
+                .get(&(i + 1))
+                .cloned()
+                .unwrap_or_else(|| default_type.to_string());
+            (name.trim().to_string(), resolved_type)
+        })
+        .collect();
+
+    for (name, _) in &item_columns {
+        if name.is_empty() {
+            return Err(AppError::BadRequest(
+                "Column headers cannot be empty".into(),
+            ));
+        }
+    }
+
+    // Create wealth items that don't exist yet
+    let existing_items = list_wealth_items(pool, portfolio_id).await?;
+    let existing_names: std::collections::HashMap<String, Uuid> = existing_items
+        .iter()
+        .map(|wi| (wi.name.clone(), wi.item_id))
+        .collect();
+
+    let mut item_ids: Vec<Uuid> = Vec::new();
+    let mut items_created = 0usize;
+    for (name, itype) in &item_columns {
+        if let Some(&id) = existing_names.get(name) {
+            item_ids.push(id);
+        } else {
+            let id = create_wealth_item(pool, portfolio_id, name, itype).await?;
+            item_ids.push(id);
+            items_created += 1;
+        }
+    }
+
+    let mut rows_imported = 0usize;
+    let mut rows_skipped = 0usize;
+
+    // Detect date format from first data row
+    let date_formats = [
+        "%Y-%m-%d",
+        "%m/%d/%Y",
+        "%d/%m/%Y",
+        "%m/%d/%y",
+        "%d/%m/%y",
+        "%Y/%m/%d",
+    ];
+
+    for result in reader.records() {
+        let record = match result {
+            Ok(r) => r,
+            Err(_) => {
+                rows_skipped += 1;
+                continue;
+            }
+        };
+
+        let date_str = record.get(0).unwrap_or("").trim();
+        if date_str.is_empty() {
+            rows_skipped += 1;
+            continue;
+        }
+
+        let log_date = match date_formats
+            .iter()
+            .find_map(|fmt| NaiveDate::parse_from_str(date_str, fmt).ok())
+        {
+            Some(d) => d,
+            None => {
+                rows_skipped += 1;
+                continue;
+            }
+        };
+
+        for (i, item_id) in item_ids.iter().enumerate() {
+            let value_str = record.get(i + 1).unwrap_or("").trim();
+            if value_str.is_empty() {
+                continue;
+            }
+            let cents = match utils::parse_dollars(value_str) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            upsert_balance_log(pool, *item_id, log_date, cents).await?;
+        }
+
+        rows_imported += 1;
+    }
+
+    Ok(ImportResult {
+        rows_imported,
+        rows_skipped,
+        items_created,
+    })
 }
