@@ -350,10 +350,9 @@ pub async fn restore_from_backup(
             "restore",
             "-config",
             &config_path,
-            "-db",
-            db_path,
             "-o",
             &restore_path,
+            db_path,
         ])
         .output()
         .await
