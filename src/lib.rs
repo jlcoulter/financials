@@ -47,6 +47,9 @@ pub fn app(state: AppState) -> Router {
         .route("/portfolio/{id}/cell", axum::routing::get(pages::edit_cell))
         .route("/portfolio/{id}/cell", axum::routing::put(pages::save_cell))
         .route("/portfolio/{id}/delete", axum::routing::post(pages::delete_portfolio))
+        .route("/portfolio/{id}/import", axum::routing::get(pages::portfolio_import))
+        .route("/portfolio/{id}/import", axum::routing::post(pages::portfolio_import_post))
+        .route("/portfolio/{id}/export/csv", axum::routing::get(pages::portfolio_csv))
         .route("/stats", axum::routing::get(pages::stats))
         // Feature pages
         .route("/transactions", axum::routing::get(pages_features::transactions))

@@ -1,4 +1,5 @@
 use crate::error::AppError;
+use crate::utils;
 use chrono::NaiveDate;
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -238,6 +239,129 @@ pub async fn list_all_wealth_items_for_user(
             Ok(WealthItemWithPortfolio { item_id, portfolio_id, name, item_type })
         })
         .collect()
+}
+
+/// Import CSV data into a portfolio.
+///
+/// Expected CSV format: first column is a date (YYYY-MM-DD), subsequent columns are
+/// wealth item names. The header row defines the column mapping.
+/// `item_type` is the default type for newly created items (asset, debt, investment).
+/// `column_types` maps column indices to item types, overriding `item_type`.
+pub async fn import_csv(
+    pool: &SqlitePool,
+    portfolio_id: Uuid,
+    csv_data: &str,
+    item_type: &str,
+    column_types: &std::collections::HashMap<usize, String>,
+) -> Result<ImportResult, AppError> {
+    let mut reader = csv::ReaderBuilder::new()
+        .flexible(true)
+        .from_reader(csv_data.as_bytes());
+
+    let headers = reader.headers()
+        .map_err(|e| AppError::BadRequest(format!("Failed to read CSV headers: {}", e)))?
+        .clone();
+
+    if headers.is_empty() {
+        return Err(AppError::BadRequest("CSV file is empty".into()));
+    }
+
+    // First column must be date, rest are item names
+    let date_header = &headers[0];
+    if date_header.trim().is_empty() {
+        return Err(AppError::BadRequest("First column header must be a date column".into()));
+    }
+
+    let item_columns: Vec<(String, String)> = headers.iter().skip(1).enumerate().map(|(i, name)| {
+        let resolved_type = column_types.get(&(i + 1))
+            .cloned()
+            .unwrap_or_else(|| item_type.to_string());
+        (name.trim().to_string(), resolved_type)
+    }).collect();
+
+    // Validate item names are not empty
+    for (name, _) in &item_columns {
+        if name.is_empty() {
+            return Err(AppError::BadRequest("Column headers cannot be empty".into()));
+        }
+    }
+
+    // Create wealth items that don't exist yet
+    let existing_items = list_wealth_items(pool, portfolio_id).await?;
+    let existing_names: std::collections::HashMap<String, Uuid> = existing_items.iter()
+        .map(|wi| (wi.name.clone(), wi.item_id))
+        .collect();
+
+    let mut item_ids: Vec<(Uuid, String)> = Vec::new();
+    for (name, itype) in &item_columns {
+        if let Some(&id) = existing_names.get(name) {
+            item_ids.push((id, name.clone()));
+        } else {
+            let id = create_wealth_item(pool, portfolio_id, name, itype).await?;
+            item_ids.push((id, name.clone()));
+        }
+    }
+
+    let mut rows_imported = 0usize;
+    let mut rows_skipped = 0usize;
+
+    for result in reader.records() {
+        let record = match result {
+            Ok(r) => r,
+            Err(_) => {
+                rows_skipped += 1;
+                continue;
+            }
+        };
+
+        // Parse date from first column
+        let date_str = record.get(0).unwrap_or("").trim();
+        if date_str.is_empty() {
+            rows_skipped += 1;
+            continue;
+        }
+
+        let log_date = match NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+            Ok(d) => d,
+            Err(_) => {
+                // Try alternate formats
+                match NaiveDate::parse_from_str(date_str, "%m/%d/%Y") {
+                    Ok(d) => d,
+                    Err(_) => {
+                        rows_skipped += 1;
+                        continue;
+                    }
+                }
+            }
+        };
+
+        // Upsert each value column
+        for (i, (item_id, _name)) in item_ids.iter().enumerate() {
+            let value_str = record.get(i + 1).unwrap_or("").trim();
+            if value_str.is_empty() {
+                continue; // Skip empty cells (no value for this date/item combo)
+            }
+            let cents = match utils::parse_dollars(value_str) {
+                Ok(c) => c,
+                Err(_) => continue, // Skip invalid values
+            };
+            upsert_balance_log(pool, *item_id, log_date, cents).await?;
+        }
+
+        rows_imported += 1;
+    }
+
+    Ok(ImportResult {
+        rows_imported,
+        rows_skipped,
+        items_created: item_columns.len(),
+    })
+}
+
+pub struct ImportResult {
+    pub rows_imported: usize,
+    pub rows_skipped: usize,
+    pub items_created: usize,
 }
 
 /// Fetch all balance logs for a user across all their portfolios (batch version to avoid N+1).
