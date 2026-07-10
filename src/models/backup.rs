@@ -17,7 +17,10 @@ pub struct BackupConfig {
     pub enabled: bool,
 }
 
-pub async fn get_config(pool: &SqlitePool, user_id: Uuid) -> Result<Option<BackupConfig>, AppError> {
+pub async fn get_config(
+    pool: &SqlitePool,
+    user_id: Uuid,
+) -> Result<Option<BackupConfig>, AppError> {
     let row = sqlx::query_as::<_, (String, String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool)>(
         "SELECT id, provider, bucket, path, region, endpoint, access_key_id, secret_access_key, b2_key_id, b2_application_key, enabled FROM backup_config WHERE user_id = ?",
     )
@@ -26,7 +29,19 @@ pub async fn get_config(pool: &SqlitePool, user_id: Uuid) -> Result<Option<Backu
     .await?;
 
     match row {
-        Some((id_str, provider, bucket, path, region, endpoint, access_key_id, secret_access_key, b2_key_id, b2_application_key, enabled)) => {
+        Some((
+            id_str,
+            provider,
+            bucket,
+            path,
+            region,
+            endpoint,
+            access_key_id,
+            secret_access_key,
+            b2_key_id,
+            b2_application_key,
+            enabled,
+        )) => {
             let id = Uuid::parse_str(&id_str)?;
             Ok(Some(BackupConfig {
                 id,
@@ -47,7 +62,11 @@ pub async fn get_config(pool: &SqlitePool, user_id: Uuid) -> Result<Option<Backu
     }
 }
 
-pub async fn save_config(pool: &SqlitePool, user_id: Uuid, config: &BackupConfig) -> Result<(), AppError> {
+pub async fn save_config(
+    pool: &SqlitePool,
+    user_id: Uuid,
+    config: &BackupConfig,
+) -> Result<(), AppError> {
     // Upsert: if a config exists for this user, update it; otherwise insert
     let existing = sqlx::query("SELECT id FROM backup_config WHERE user_id = ?")
         .bind(user_id.to_string())
@@ -100,11 +119,13 @@ pub async fn save_config(pool: &SqlitePool, user_id: Uuid, config: &BackupConfig
 }
 
 pub async fn set_enabled(pool: &SqlitePool, user_id: Uuid, enabled: bool) -> Result<(), AppError> {
-    let result = sqlx::query("UPDATE backup_config SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?")
-        .bind(enabled)
-        .bind(user_id.to_string())
-        .execute(pool)
-        .await?;
+    let result = sqlx::query(
+        "UPDATE backup_config SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+    )
+    .bind(enabled)
+    .bind(user_id.to_string())
+    .execute(pool)
+    .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::BadRequest("No backup config found".into()));
@@ -122,10 +143,7 @@ pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String 
 
     match config.provider.as_str() {
         "b2" => {
-            yaml.push_str(&format!(
-                "b2://{}\n",
-                config.bucket
-            ));
+            yaml.push_str(&format!("b2://{}\n", config.bucket));
             yaml.push_str("        auth:\n");
             yaml.push_str(&format!(
                 "          account_id: {}\n",

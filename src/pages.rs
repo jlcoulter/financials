@@ -2,13 +2,15 @@ use crate::AppState;
 use crate::cookies::LoggedInUser;
 use crate::error::AppError;
 use crate::layout::layout;
+use crate::models::backup;
 use crate::models::csv_import;
 use crate::models::portfolio::{self, BalanceLog, WealthItem};
 use crate::models::reconcile::{self, OutgoingTxn, ReconciledTxn};
 use crate::models::user;
 use crate::utils;
-use axum::extract::{Path, State};
+use axum::extract::{Form, Path, State};
 use axum::response::IntoResponse;
+use axum::response::Redirect;
 use chrono::NaiveDate;
 use uuid::Uuid;
 
@@ -902,6 +904,10 @@ pub async fn dashboard(State(state): State<AppState>, user: LoggedInUser) -> imp
                 a href="/reconcile" class="card" {
                     h3 { "Reconcile" }
                     p { "Match outgoing transactions to reconciled records" }
+                }
+                a href="/settings" class="card" {
+                    h3 { "Settings" }
+                    p { "Configure backups and preferences" }
                 }
             }
         },
@@ -2646,4 +2652,244 @@ pub async fn not_found(State(_state): State<AppState>) -> impl IntoResponse {
         },
         None,
     )
+}
+
+// ── Settings / Backup ──
+
+pub async fn settings(
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<maud::Markup, AppError> {
+    let config = backup::get_config(state.db(), user.0).await?;
+    let username = user::get_username_by_id(state.db(), user.0)
+        .await
+        .unwrap_or_else(|_| "User".to_string());
+
+    let (provider, bucket, path, region, endpoint, access_key_id, b2_key_id, _enabled) =
+        match &config {
+            Some(c) => (
+                c.provider.clone(),
+                c.bucket.clone(),
+                c.path.clone(),
+                c.region.clone(),
+                c.endpoint.clone(),
+                c.access_key_id.clone(),
+                c.b2_key_id.clone(),
+                c.enabled,
+            ),
+            None => (
+                "s3".to_string(),
+                String::new(),
+                "financials-backups".to_string(),
+                "us-east-1".to_string(),
+                None,
+                None,
+                None,
+                false,
+            ),
+        };
+
+    let s3_style = if provider == "s3" { "" } else { "display:none" };
+    let b2_style = if provider == "b2" { "" } else { "display:none" };
+
+    let flash = config.as_ref().map(|c| {
+        if c.enabled {
+            "Backups are active."
+        } else {
+            "Backups are paused."
+        }
+    });
+
+    let provider_options = if provider == "s3" {
+        maud::html! {
+            option value="s3" selected { "Amazon S3 / S3-compatible" }
+            option value="b2" { "Backblaze B2" }
+        }
+    } else {
+        maud::html! {
+            option value="s3" { "Amazon S3 / S3-compatible" }
+            option value="b2" selected { "Backblaze B2" }
+        }
+    };
+
+    let enable_disable_btn = match &config {
+        Some(c) if c.enabled => Some(maud::html! {
+            button type="submit" formaction="/settings/backup/disable" class="btn btn-ghost" { "Pause Backups" }
+        }),
+        Some(_) => Some(maud::html! {
+            button type="submit" formaction="/settings/backup/enable" class="btn" { "Enable Backups" }
+        }),
+        None => None,
+    };
+
+    Ok(layout(
+        "Settings",
+        maud::html! {
+            h2 { "Settings" }
+            p { "Hello, " (username) }
+
+            @if let Some(msg) = flash {
+                div class="flash flash-info" { (msg) }
+            }
+
+            div class="settings-tabs" {
+                button class="tab-btn active" data-tab="backup" { "Backup" }
+            }
+
+            div id="backup" class="tab-content" {
+                h3 { "Database Backups" }
+                p { "Automatically back up your financial data to cloud storage. Choose a provider and enter your credentials." }
+
+                form action="/settings/backup" method="post" class="settings-form" {
+                    label { "Provider"
+                        select name="provider" id="provider-select" {
+                            (provider_options)
+                        }
+                    }
+
+                    div id="s3-fields" style=(s3_style) {
+                        label { "Bucket Name"
+                            input type="text" name="bucket" value=(bucket) placeholder="my-financials-backups";
+                        }
+                        label { "Backup Path Prefix"
+                            input type="text" name="path" value=(path) placeholder="financials-backups";
+                        }
+                        label { "Region"
+                            input type="text" name="region" value=(region) placeholder="us-east-1";
+                        }
+                        label { "Custom Endpoint (optional — leave empty for AWS)"
+                            input type="text" name="endpoint" value=(endpoint.unwrap_or_default()) placeholder="https://s3.example.com";
+                        }
+                        label { "Access Key ID"
+                            input type="text" name="access_key_id" value=(access_key_id.unwrap_or_default()) autocomplete="off";
+                        }
+                        label { "Secret Access Key"
+                            input type="password" name="secret_access_key" autocomplete="new-password" placeholder="Enter your secret key";
+                        }
+                    }
+
+                    div id="b2-fields" style=(b2_style) {
+                        label { "Bucket Name"
+                            input type="text" name="bucket" value=(bucket) placeholder="my-b2-bucket";
+                        }
+                        label { "Backup Path Prefix"
+                            input type="text" name="path" value=(path) placeholder="financials-backups";
+                        }
+                        label { "Key ID"
+                            input type="text" name="b2_key_id" value=(b2_key_id.unwrap_or_default()) autocomplete="off";
+                        }
+                        label { "Application Key"
+                            input type="password" name="b2_application_key" autocomplete="new-password" placeholder="Enter your application key";
+                        }
+                    }
+
+                    div class="settings-actions" {
+                        button type="submit" class="btn" { "Save Configuration" }
+                        @if let Some(btn) = enable_disable_btn {
+                            (btn)
+                        }
+                    }
+                }
+            }
+
+            script type="text/javascript" {
+                (maud::PreEscaped("document.getElementById('provider-select').addEventListener('change', function() { document.getElementById('s3-fields').style.display = this.value === 's3' ? '' : 'none'; document.getElementById('b2-fields').style.display = this.value === 'b2' ? '' : 'none'; });"))
+            }
+        },
+        Some(&user),
+    ))
+}
+
+#[derive(serde::Deserialize)]
+pub struct BackupForm {
+    provider: String,
+    bucket: String,
+    path: String,
+    region: String,
+    endpoint: Option<String>,
+    access_key_id: Option<String>,
+    secret_access_key: Option<String>,
+    b2_key_id: Option<String>,
+    b2_application_key: Option<String>,
+}
+
+pub async fn settings_backup_post(
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    Form(form): Form<BackupForm>,
+) -> Result<axum::response::Response, AppError> {
+    // Trim empty strings to None for optional fields
+    let endpoint = form.endpoint.filter(|s| !s.trim().is_empty());
+    let access_key_id = form.access_key_id.filter(|s| !s.trim().is_empty());
+    let secret_access_key = form.secret_access_key.filter(|s| !s.trim().is_empty());
+    let b2_key_id = form.b2_key_id.filter(|s| !s.trim().is_empty());
+    let b2_application_key = form.b2_application_key.filter(|s| !s.trim().is_empty());
+
+    // If secret_access_key is empty and we have an existing config, keep the old one
+    let secret_access_key = match secret_access_key {
+        Some(s) => Some(s),
+        None => {
+            let existing = backup::get_config(state.db(), user.0).await?;
+            existing.and_then(|c| c.secret_access_key)
+        }
+    };
+    let b2_application_key = match b2_application_key {
+        Some(s) => Some(s),
+        None => {
+            let existing = backup::get_config(state.db(), user.0).await?;
+            existing.and_then(|c| c.b2_application_key)
+        }
+    };
+
+    let config = backup::BackupConfig {
+        id: Uuid::nil(), // Will be set by save_config if new
+        user_id: user.0,
+        provider: form.provider,
+        bucket: form.bucket,
+        path: form.path,
+        region: form.region,
+        endpoint,
+        access_key_id,
+        secret_access_key,
+        b2_key_id,
+        b2_application_key,
+        enabled: false, // Start paused; user explicitly enables
+    };
+
+    // Preserve existing enabled state if updating
+    let existing = backup::get_config(state.db(), user.0).await?;
+    let config = match existing {
+        Some(mut c) => {
+            c.provider = config.provider;
+            c.bucket = config.bucket;
+            c.path = config.path;
+            c.region = config.region;
+            c.endpoint = config.endpoint;
+            c.access_key_id = config.access_key_id;
+            c.secret_access_key = config.secret_access_key;
+            c.b2_key_id = config.b2_key_id;
+            c.b2_application_key = config.b2_application_key;
+            c
+        }
+        None => config,
+    };
+
+    backup::save_config(state.db(), user.0, &config).await?;
+    Ok(Redirect::to("/settings?saved").into_response())
+}
+
+pub async fn settings_backup_enable(
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<axum::response::Response, AppError> {
+    backup::set_enabled(state.db(), user.0, true).await?;
+    Ok(Redirect::to("/settings?enabled").into_response())
+}
+
+pub async fn settings_backup_disable(
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<axum::response::Response, AppError> {
+    backup::set_enabled(state.db(), user.0, false).await?;
+    Ok(Redirect::to("/settings?disabled").into_response())
 }
