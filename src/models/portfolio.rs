@@ -11,6 +11,7 @@ pub struct WealthItem {
     pub position: i32,
 }
 
+#[allow(dead_code)]
 pub struct BalanceLog {
     pub log_id: Uuid,
     pub item_id: Uuid,
@@ -245,7 +246,7 @@ pub async fn create_portfolio(
     name: &str,
 ) -> Result<Uuid, AppError> {
     let id = Uuid::now_v7();
-    let result =
+    let _result =
         sqlx::query("INSERT INTO portfolios (portfolio_id, user_id, name) VALUES (?, ?, ?)")
             .bind(id.to_string())
             .bind(user_id.to_string())
@@ -348,10 +349,7 @@ pub async fn import_csv(
         .flexible(true)
         .from_reader(raw.as_bytes());
 
-    let records: Vec<csv::StringRecord> = reader
-        .records()
-        .filter_map(|r| r.ok())
-        .collect();
+    let records: Vec<csv::StringRecord> = reader.records().filter_map(|r| r.ok()).collect();
 
     if records.is_empty() {
         return Err(AppError::BadRequest("CSV has no data rows".into()));
