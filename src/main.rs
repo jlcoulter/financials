@@ -42,6 +42,19 @@ fn app(state: AppState) -> Router {
         .route("/login", axum::routing::get(auth::login))
         .route("/login", axum::routing::post(auth::login_post))
         .route("/dashboard", axum::routing::get(pages::dashboard))
+        .route("/settings", axum::routing::get(pages::settings))
+        .route(
+            "/settings/backup",
+            axum::routing::post(pages::settings_backup_post),
+        )
+        .route(
+            "/settings/backup/enable",
+            axum::routing::post(pages::settings_backup_enable),
+        )
+        .route(
+            "/settings/backup/disable",
+            axum::routing::post(pages::settings_backup_disable),
+        )
         .route("/insights", axum::routing::get(pages::insights))
         .route("/insights/{id}", axum::routing::get(pages::insights_chart))
         .route("/logout", axum::routing::post(auth::logout_post))
