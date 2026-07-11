@@ -6,7 +6,8 @@ use std::str::FromStr;
 use axum::Router;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
-use tokio::sync::Mutex;
+use std::sync::Arc;
+use tokio::sync::{Mutex, RwLock};
 use tower_http::services::ServeDir;
 
 #[tokio::main]
@@ -30,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     let key = axum_extra::extract::cookie::Key::generate();
     let litestream_child = std::sync::Arc::new(Mutex::new(None));
     let state = AppState {
-        db: db.clone(),
+        db: Arc::new(RwLock::new(db.clone())),
         key,
         db_path: db_path.clone(),
         config_dir: config_dir.clone(),

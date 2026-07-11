@@ -79,7 +79,7 @@ pub async fn create_portfolio(
     if form.name.trim().is_empty() {
         return Err(AppError::BadRequest("Portfolio name is required".into()));
     }
-    portfolio::create_portfolio(state.db(), user.0, form.name.trim()).await?;
+    portfolio::create_portfolio(&state.db().await, user.0, form.name.trim()).await?;
     Ok(axum::response::Redirect::to("/portfolios"))
 }
 
@@ -89,8 +89,9 @@ pub async fn add_item(
     user: LoggedInUser,
     axum::Form(form): axum::Form<AddItemForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    portfolio::create_wealth_item(state.db(), portfolio_id, &form.name, &form.item_type).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
+    portfolio::create_wealth_item(&state.db().await, portfolio_id, &form.name, &form.item_type)
+        .await?;
     Ok(axum::response::Redirect::to(&format!(
         "/portfolio/{}",
         portfolio_id
@@ -108,13 +109,13 @@ pub async fn rename_portfolio(
     user: LoggedInUser,
     axum::Form(form): axum::Form<RenamePortfolioForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     if form.name.trim().is_empty() {
         return Err(AppError::BadRequest(
             "Portfolio name cannot be empty".into(),
         ));
     }
-    portfolio::rename_portfolio(state.db(), portfolio_id, form.name.trim()).await?;
+    portfolio::rename_portfolio(&state.db().await, portfolio_id, form.name.trim()).await?;
     Ok(axum::response::Redirect::to(&format!(
         "/portfolio/{}",
         portfolio_id
@@ -133,8 +134,14 @@ pub async fn move_item(
     user: LoggedInUser,
     axum::extract::Query(query): axum::extract::Query<MoveItemQuery>,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    portfolio::move_wealth_item(state.db(), portfolio_id, query.item_id, &query.direction).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
+    portfolio::move_wealth_item(
+        &state.db().await,
+        portfolio_id,
+        query.item_id,
+        &query.direction,
+    )
+    .await?;
     Ok(axum::response::Redirect::to(&format!(
         "/portfolio/{}",
         portfolio_id
@@ -145,7 +152,7 @@ pub async fn portfolios(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let portfolios = portfolio::list_portfolios(state.db(), user.0).await?;
+    let portfolios = portfolio::list_portfolios(&state.db().await, user.0).await?;
     Ok(layout(
         "Portfolios",
         maud::html! {
@@ -187,9 +194,9 @@ pub async fn portfolio(
     user: LoggedInUser,
     axum::extract::Query(query): axum::extract::Query<PortfolioQuery>,
 ) -> Result<maud::Markup, AppError> {
-    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let (_id, name) = portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
     let grid_rows = pivot_logs(&items, &logs);
 
     Ok(layout(
@@ -372,20 +379,20 @@ pub async fn add_balance(
     user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
 
     let log_date_str = form
         .get("log_date")
         .ok_or_else(|| AppError::BadRequest("Missing log date field".into()))?;
     let log_date = NaiveDate::parse_from_str(log_date_str, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
     for item in &items {
         let key = format!("balance_{}", item.item_id);
         if let Some(value) = form.get(&key)
             && let Ok(cents) = utils::parse_dollars(value)
         {
-            portfolio::insert_balance_log(state.db(), item.item_id, log_date, cents).await?;
+            portfolio::insert_balance_log(&state.db().await, item.item_id, log_date, cents).await?;
         }
     }
 
@@ -396,7 +403,7 @@ pub async fn add_balance(
         .map(|(i, wi)| (wi.item_id, i))
         .collect();
 
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
     let values: Vec<Option<i64>> = items
         .iter()
         .map(|item| {
@@ -472,13 +479,13 @@ pub async fn edit_cell(
     user: LoggedInUser,
     axum::extract::Query(query): axum::extract::Query<CellQuery>,
 ) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let item_id = Uuid::parse_str(&query.item_id)
         .map_err(|_| AppError::BadRequest("Invalid item ID.".into()))?;
     let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
 
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
     let current_cents = logs
         .iter()
         .find(|l| l.item_id == item_id && l.log_date == date)
@@ -526,7 +533,7 @@ pub async fn save_cell(
     user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let item_id_str = form
         .get("item_id")
         .ok_or_else(|| AppError::BadRequest("Missing item_id".into()))?;
@@ -555,7 +562,7 @@ pub async fn save_cell(
     }
 
     let cents = utils::parse_dollars(value_str).map_err(AppError::BadRequest)?;
-    portfolio::upsert_balance_log(state.db(), item_id, date, cents).await?;
+    portfolio::upsert_balance_log(&state.db().await, item_id, date, cents).await?;
 
     Ok(maud::html! {
         td id=(cell_id) class="editable" tabindex="0"
@@ -580,7 +587,7 @@ pub async fn edit_date(
     user: LoggedInUser,
     axum::extract::Query(query): axum::extract::Query<DateQuery>,
 ) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
 
@@ -699,7 +706,7 @@ pub async fn save_date(
     user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let old_date_str = form
         .get("old_date")
         .ok_or_else(|| AppError::BadRequest("Missing old_date".into()))?;
@@ -709,8 +716,8 @@ pub async fn save_date(
     let old_date = NaiveDate::parse_from_str(old_date_str, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid old date format. Use YYYY-MM-DD.".into()))?;
 
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
 
     // If new_date is invalid, re-render the original row with an error
     let new_date = match NaiveDate::parse_from_str(new_date_str, "%Y-%m-%d") {
@@ -746,7 +753,7 @@ pub async fn save_date(
         return Ok(render_data_row(portfolio_id, &items, old_date, &values));
     }
 
-    match portfolio::rename_date(state.db(), portfolio_id, old_date, new_date).await {
+    match portfolio::rename_date(&state.db().await, portfolio_id, old_date, new_date).await {
         Ok(_) => {}
         Err(AppError::BadRequest(msg)) => {
             let values: Vec<Option<i64>> = items
@@ -787,12 +794,12 @@ pub async fn get_row(
     user: LoggedInUser,
     axum::extract::Query(query): axum::extract::Query<DateQuery>,
 ) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
 
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
     let values: Vec<Option<i64>> = items
         .iter()
         .map(|item| {
@@ -811,7 +818,7 @@ pub async fn save_item_name(
     user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let item_id_str = form
         .get("item_id")
         .ok_or_else(|| AppError::BadRequest("Missing item_id".into()))?;
@@ -824,7 +831,7 @@ pub async fn save_item_name(
         return Err(AppError::BadRequest("Item name cannot be empty".into()));
     }
 
-    portfolio::rename_wealth_item(state.db(), item_id, name.trim()).await?;
+    portfolio::rename_wealth_item(&state.db().await, item_id, name.trim()).await?;
     Ok(axum::response::Redirect::to(&format!(
         "/portfolio/{}",
         portfolio_id
@@ -848,12 +855,12 @@ pub async fn change_item_type(
     user: LoggedInUser,
     axum::Form(form): axum::Form<ChangeTypeForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let valid_types = ["asset", "cash", "debt", "investment"];
     if !valid_types.contains(&form.item_type.as_str()) {
         return Err(AppError::BadRequest("Invalid item type".into()));
     }
-    portfolio::change_wealth_item_type(state.db(), form.item_id, &form.item_type).await?;
+    portfolio::change_wealth_item_type(&state.db().await, form.item_id, &form.item_type).await?;
     Ok(axum::response::Redirect::to(&format!(
         "/portfolio/{}",
         portfolio_id
@@ -866,8 +873,8 @@ pub async fn delete_item(
     user: LoggedInUser,
     axum::Form(form): axum::Form<DeleteItemForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    portfolio::delete_wealth_item(state.db(), form.item_id).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
+    portfolio::delete_wealth_item(&state.db().await, form.item_id).await?;
     Ok(axum::response::Redirect::to(&format!(
         "/portfolio/{}",
         portfolio_id
@@ -875,7 +882,7 @@ pub async fn delete_item(
 }
 
 pub async fn dashboard(State(state): State<AppState>, user: LoggedInUser) -> impl IntoResponse {
-    let username = user::get_username_by_id(state.db(), user.0)
+    let username = user::get_username_by_id(&state.db().await, user.0)
         .await
         .unwrap_or_else(|_| "User".to_string());
     let hour = chrono::Local::now()
@@ -919,7 +926,7 @@ pub async fn insights(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let portfolios = portfolio::list_portfolios(state.db(), user.0).await?;
+    let portfolios = portfolio::list_portfolios(&state.db().await, user.0).await?;
 
     // Build portfolio selector links
     let portfolio_links: Vec<maud::Markup> = portfolios
@@ -950,15 +957,15 @@ pub async fn insights_chart(
     user: LoggedInUser,
     Path(portfolio_id): Path<Uuid>,
 ) -> Result<maud::Markup, AppError> {
-    let portfolios = portfolio::list_portfolios(state.db(), user.0).await?;
+    let portfolios = portfolio::list_portfolios(&state.db().await, user.0).await?;
     let portfolio_name = portfolios
         .iter()
         .find(|(pid, _)| pid == &portfolio_id)
         .map(|(_, pname)| pname.clone())
         .unwrap_or_else(|| "Unknown".to_string());
 
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
 
     // Get unique dates sorted ascending
     let mut dates: Vec<String> = logs
@@ -1201,7 +1208,7 @@ pub async fn reconcile_list(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let sessions = reconcile::list_sessions(state.db(), user.0).await?;
+    let sessions = reconcile::list_sessions(&state.db().await, user.0).await?;
     Ok(layout(
         "Reconcile",
         maud::html! {
@@ -1254,7 +1261,7 @@ pub async fn reconcile_create(
     if form.name.trim().is_empty() {
         return Err(AppError::BadRequest("Session name is required".into()));
     }
-    let id = reconcile::create_session(state.db(), user.0, form.name.trim()).await?;
+    let id = reconcile::create_session(&state.db().await, user.0, form.name.trim()).await?;
     Ok(axum::response::Redirect::to(&format!("/reconcile/{}", id)))
 }
 
@@ -1263,8 +1270,8 @@ pub async fn reconcile_delete(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
-    reconcile::delete_session(state.db(), session_id).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    reconcile::delete_session(&state.db().await, session_id).await?;
     Ok(axum::response::Redirect::to("/reconcile"))
 }
 
@@ -1273,10 +1280,10 @@ pub async fn reconcile_detail(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let (_, name) = reconcile::get_session(state.db(), session_id, user.0).await?;
-    let outgoing = reconcile::list_outgoing(state.db(), session_id).await?;
-    let reconciled = reconcile::list_reconciled(state.db(), session_id).await?;
-    let matches = reconcile::list_matches(state.db(), session_id).await?;
+    let (_, name) = reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    let outgoing = reconcile::list_outgoing(&state.db().await, session_id).await?;
+    let reconciled = reconcile::list_reconciled(&state.db().await, session_id).await?;
+    let matches = reconcile::list_matches(&state.db().await, session_id).await?;
 
     // Build lookup: outgoing_id -> list of reconciled_ids
     let mut match_map: std::collections::HashMap<Uuid, Vec<Uuid>> =
@@ -1482,7 +1489,7 @@ pub async fn add_outgoing(
     user: LoggedInUser,
     axum::Form(form): axum::Form<AddTxnForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let date = NaiveDate::parse_from_str(&form.date, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
     let cents = utils::parse_dollars(&form.amount).map_err(AppError::BadRequest)?;
@@ -1490,7 +1497,7 @@ pub async fn add_outgoing(
         .vendor
         .map(|v| v.trim().to_string())
         .unwrap_or_default();
-    reconcile::add_outgoing(state.db(), session_id, date, cents, &vendor).await?;
+    reconcile::add_outgoing(&state.db().await, session_id, date, cents, &vendor).await?;
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
         session_id
@@ -1503,7 +1510,7 @@ pub async fn add_reconciled(
     user: LoggedInUser,
     axum::Form(form): axum::Form<AddTxnForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let date = NaiveDate::parse_from_str(&form.date, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
     let cents = utils::parse_dollars(&form.amount).map_err(AppError::BadRequest)?;
@@ -1511,7 +1518,7 @@ pub async fn add_reconciled(
         .vendor
         .map(|v| v.trim().to_string())
         .unwrap_or_default();
-    reconcile::add_reconciled(state.db(), session_id, date, cents, &vendor).await?;
+    reconcile::add_reconciled(&state.db().await, session_id, date, cents, &vendor).await?;
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
         session_id
@@ -1524,7 +1531,7 @@ pub async fn link_txns(
     user: LoggedInUser,
     body: axum::body::Bytes,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
     let mut outgoing_id: Option<Uuid> = None;
     let mut reconciled_ids: Vec<Uuid> = Vec::new();
@@ -1554,7 +1561,7 @@ pub async fn link_txns(
         ));
     }
     for reconciled_id in reconciled_ids {
-        reconcile::link_transactions(state.db(), outgoing_id, reconciled_id).await?;
+        reconcile::link_transactions(&state.db().await, outgoing_id, reconciled_id).await?;
     }
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
@@ -1573,13 +1580,13 @@ pub async fn unlink_txns(
     user: LoggedInUser,
     axum::Form(form): axum::Form<UnlinkForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let outgoing_id = Uuid::parse_str(&form.outgoing_id)
         .map_err(|_| AppError::BadRequest("Invalid outgoing ID".into()))?;
     // Find and remove all match_links for this outgoing
-    let matches = reconcile::list_matches(state.db(), session_id).await?;
+    let matches = reconcile::list_matches(&state.db().await, session_id).await?;
     for m in matches.iter().filter(|m| m.outgoing_id == outgoing_id) {
-        reconcile::unlink_transaction(state.db(), m.match_id).await?;
+        reconcile::unlink_transaction(&state.db().await, m.match_id).await?;
     }
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
@@ -1598,12 +1605,12 @@ pub async fn unlink_reconciled_txns(
     user: LoggedInUser,
     axum::Form(form): axum::Form<UnlinkReconciledForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let reconciled_id = Uuid::parse_str(&form.reconciled_id)
         .map_err(|_| AppError::BadRequest("Invalid reconciled ID".into()))?;
-    let matches = reconcile::list_matches(state.db(), session_id).await?;
+    let matches = reconcile::list_matches(&state.db().await, session_id).await?;
     for m in matches.iter().filter(|m| m.reconciled_id == reconciled_id) {
-        reconcile::unlink_transaction(state.db(), m.match_id).await?;
+        reconcile::unlink_transaction(&state.db().await, m.match_id).await?;
     }
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
@@ -1625,11 +1632,11 @@ async fn render_proposals_page(
     user: crate::cookies::LoggedInUser,
     skip_ids: &[Uuid],
 ) -> Result<maud::Markup, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
-    let proposals = reconcile::auto_match(state.db(), session_id, skip_ids).await?;
-    let (_, name) = reconcile::get_session(state.db(), session_id, user.0).await?;
-    let outgoing = reconcile::list_outgoing(state.db(), session_id).await?;
-    let reconciled = reconcile::list_reconciled(state.db(), session_id).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    let proposals = reconcile::auto_match(&state.db().await, session_id, skip_ids).await?;
+    let (_, name) = reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    let outgoing = reconcile::list_outgoing(&state.db().await, session_id).await?;
+    let reconciled = reconcile::list_reconciled(&state.db().await, session_id).await?;
 
     Ok(layout(
         &format!("Reconcile — {}", name),
@@ -1724,7 +1731,7 @@ pub async fn confirm_proposal(
     user: LoggedInUser,
     body: axum::body::Bytes,
 ) -> Result<maud::Markup, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
     let mut outgoing_id: Option<Uuid> = None;
     let mut reconciled_ids: Vec<Uuid> = Vec::new();
@@ -1754,7 +1761,7 @@ pub async fn confirm_proposal(
     // Apply this match
     if let Some(oid) = outgoing_id {
         for rid in &reconciled_ids {
-            reconcile::link_transactions(state.db(), oid, *rid).await?;
+            reconcile::link_transactions(&state.db().await, oid, *rid).await?;
         }
         skip_ids.push(oid);
     }
@@ -1768,7 +1775,7 @@ pub async fn confirm_all_proposals(
     user: LoggedInUser,
     body: axum::body::Bytes,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
     let mut skip_ids: Vec<Uuid> = Vec::new();
     for pair in body_str.split('&') {
@@ -1779,10 +1786,10 @@ pub async fn confirm_all_proposals(
             skip_ids.push(id);
         }
     }
-    let proposals = reconcile::auto_match(state.db(), session_id, &skip_ids).await?;
+    let proposals = reconcile::auto_match(&state.db().await, session_id, &skip_ids).await?;
     for p in &proposals {
         for rid in &p.reconciled_ids {
-            reconcile::link_transactions(state.db(), p.outgoing_id, *rid).await?;
+            reconcile::link_transactions(&state.db().await, p.outgoing_id, *rid).await?;
         }
     }
     Ok(axum::response::Redirect::to(&format!(
@@ -1797,7 +1804,7 @@ pub async fn reject_proposal(
     user: LoggedInUser,
     body: axum::body::Bytes,
 ) -> Result<maud::Markup, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
     let mut rejected_id: Option<Uuid> = None;
     let mut skip_ids: Vec<Uuid> = Vec::new();
@@ -1832,14 +1839,14 @@ pub async fn rename_session(
     user: LoggedInUser,
     axum::Form(form): axum::Form<RenameSessionForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     if form.name.trim().is_empty() {
         return Err(AppError::BadRequest("Session name cannot be empty".into()));
     }
     sqlx::query("UPDATE reconcile_sessions SET name = ? WHERE session_id = ?")
         .bind(form.name.trim())
         .bind(session_id.to_string())
-        .execute(state.db())
+        .execute(&state.db().await)
         .await?;
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
@@ -1872,8 +1879,8 @@ async fn upload_csv(
     mut multipart: axum::extract::Multipart,
     kind: &str,
 ) -> Result<maud::Markup, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
-    let (_, name) = reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    let (_, name) = reconcile::get_session(&state.db().await, session_id, user.0).await?;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -2013,7 +2020,7 @@ async fn confirm_csv_import(
     body: axum::body::Bytes,
     kind: &str,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
     let mut tmp_id = String::new();
     let mut date_col: Option<usize> = None;
@@ -2060,9 +2067,9 @@ async fn confirm_csv_import(
     let rows = csv_import::parse_csv_with_mapping(&raw, &mapping)?;
 
     if kind == "outgoing" {
-        reconcile::bulk_add_outgoing(state.db(), session_id, &rows).await?;
+        reconcile::bulk_add_outgoing(&state.db().await, session_id, &rows).await?;
     } else {
-        reconcile::bulk_add_reconciled(state.db(), session_id, &rows).await?;
+        reconcile::bulk_add_reconciled(&state.db().await, session_id, &rows).await?;
     }
 
     Ok(axum::response::Redirect::to(&format!(
@@ -2282,7 +2289,7 @@ pub async fn portfolio_import(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    let (_id, name) = portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     Ok(layout(
         &format!("Import CSV — {}", name),
         maud::html! {
@@ -2320,7 +2327,7 @@ pub async fn portfolio_import_post(
     user: LoggedInUser,
     mut multipart: axum::extract::Multipart,
 ) -> Result<maud::Markup, AppError> {
-    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    let (_id, name) = portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
 
     let mut csv_data = String::new();
     while let Some(field) = multipart
@@ -2355,7 +2362,7 @@ pub async fn portfolio_import_post(
         .map_err(|e| AppError::BadRequest(format!("Failed to save CSV: {}", e)))?;
 
     // Load existing wealth items for mapping
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
 
     let num_cols = analysis.preview_rows.first().map(|r| r.len()).unwrap_or(0);
     let col_numbers: Vec<usize> = (0..num_cols).collect();
@@ -2468,7 +2475,7 @@ pub async fn portfolio_import_confirm(
     user: LoggedInUser,
     body: axum::body::Bytes,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
 
     let body_str = String::from_utf8_lossy(&body);
     let mut tmp_id = String::new();
@@ -2557,7 +2564,7 @@ pub async fn portfolio_import_confirm(
         columns,
     };
 
-    let result = portfolio::import_csv(state.db(), portfolio_id, &raw, &mapping).await?;
+    let result = portfolio::import_csv(&state.db().await, portfolio_id, &raw, &mapping).await?;
 
     let flash_msg = format!(
         "Imported {} rows ({} skipped, {} items created)",
@@ -2579,9 +2586,9 @@ pub async fn portfolio_csv(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<impl IntoResponse, AppError> {
-    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let (_id, name) = portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
 
     // Track which items are debts so we export them as negative
     let debt_ids: std::collections::HashSet<Uuid> = items
@@ -2661,8 +2668,8 @@ pub async fn settings(
     user: LoggedInUser,
     Query(params): Query<SettingsFlash>,
 ) -> Result<maud::Markup, AppError> {
-    let config = backup::get_config(state.db(), user.0).await?;
-    let username = user::get_username_by_id(state.db(), user.0)
+    let config = backup::get_config(&state.db().await, user.0).await?;
+    let username = user::get_username_by_id(&state.db().await, user.0)
         .await
         .unwrap_or_else(|_| "User".to_string());
 
@@ -2908,14 +2915,14 @@ pub async fn settings_backup_post(
     let secret_access_key = match secret_access_key {
         Some(s) => Some(s),
         None => {
-            let existing = backup::get_config(state.db(), user.0).await?;
+            let existing = backup::get_config(&state.db().await, user.0).await?;
             existing.and_then(|c| c.secret_access_key)
         }
     };
     let b2_application_key = match b2_application_key {
         Some(s) => Some(s),
         None => {
-            let existing = backup::get_config(state.db(), user.0).await?;
+            let existing = backup::get_config(&state.db().await, user.0).await?;
             existing.and_then(|c| c.b2_application_key)
         }
     };
@@ -2937,7 +2944,7 @@ pub async fn settings_backup_post(
     };
 
     // Preserve existing enabled state if updating
-    let existing = backup::get_config(state.db(), user.0).await?;
+    let existing = backup::get_config(&state.db().await, user.0).await?;
     let config = match existing {
         Some(mut c) => {
             c.provider = config.provider;
@@ -2955,12 +2962,12 @@ pub async fn settings_backup_post(
         None => config,
     };
 
-    backup::save_config(state.db(), user.0, &config).await?;
+    backup::save_config(&state.db().await, user.0, &config).await?;
 
     // If the config is enabled, sync litestream immediately
     if config.enabled
         && let Err(e) = backup::sync_litestream(
-            state.db(),
+            &state.db().await,
             &state.db_path,
             &state.config_dir,
             &state.litestream_child,
@@ -2977,9 +2984,9 @@ pub async fn settings_backup_enable(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
-    backup::set_enabled(state.db(), user.0, true).await?;
+    backup::set_enabled(&state.db().await, user.0, true).await?;
     backup::sync_litestream(
-        state.db(),
+        &state.db().await,
         &state.db_path,
         &state.config_dir,
         &state.litestream_child,
@@ -2992,9 +2999,9 @@ pub async fn settings_backup_disable(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
-    backup::set_enabled(state.db(), user.0, false).await?;
+    backup::set_enabled(&state.db().await, user.0, false).await?;
     backup::sync_litestream(
-        state.db(),
+        &state.db().await,
         &state.db_path,
         &state.config_dir,
         &state.litestream_child,
@@ -3010,12 +3017,12 @@ pub struct RestoreForm {
 
 pub async fn settings_backup_restore(
     State(state): State<AppState>,
-    user: LoggedInUser,
+    _user: LoggedInUser,
     Form(form): Form<RestoreForm>,
 ) -> Result<axum::response::Response, AppError> {
     let ts = form.timestamp.as_deref();
     match backup::restore_from_backup(
-        state.db(),
+        &state.db,
         &state.db_path,
         &state.config_dir,
         &state.litestream_child,
@@ -3023,28 +3030,9 @@ pub async fn settings_backup_restore(
     )
     .await
     {
-        Ok(needs_restart) => {
-            if needs_restart {
-                // The database file has been replaced. We need to exit so the
-                // process manager restarts us with a fresh connection pool.
-                // Show a page telling the user to wait, then exit after a delay.
-                tracing::info!("Restore complete, shutting down for restart");
-                tokio::spawn(async {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                    std::process::exit(0);
-                });
-                Ok(maud::html! {
-                    (crate::layout::layout("Restore", maud::html! {
-                        div class="flash flash-success" {
-                            "Database restored from backup."
-                        }
-                        p { "The application is restarting to load the restored database. \
-                            Please wait a moment, then " a href="/login" { "click here to log in" } "." }
-                    }, Some(&user)))
-                }.into_response())
-            } else {
-                Ok(Redirect::to("/settings?flash=restored").into_response())
-            }
+        Ok(()) => {
+            tracing::info!("Restore complete, pool reconnected");
+            Ok(Redirect::to("/settings?flash=restored").into_response())
         }
         Err(e) => {
             tracing::error!("Restore failed: {e:?}");
