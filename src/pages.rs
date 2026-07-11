@@ -2857,16 +2857,14 @@ pub async fn settings(
                                             } else {
                                                 format!("{:.0} KB", size_kb)
                                             };
-                                            @let label = format!("{} ({} KB, level {})", point.timestamp, size_str, point.level);
                                             option value=(point.timestamp) {
-                                                (label)
+                                                (format!("{} — {}", point.timestamp, size_str))
                                             }
                                         }
                                     }
                                 }
-                                p class="form-hint" { "Select a point in time to restore from. \
-                                    Level 9 entries are full snapshots; lower levels are incremental WAL segments. \
-                                    For best results, choose a level 9 snapshot that is large (your full data)." }
+                                p class="form-hint" { "Each entry is a full snapshot of the database at that point in time. \
+                                    Choose the snapshot you want to restore to, or select Latest for the most recent." }
                             }
                         } @else {
                             p class="form-hint" { "No restore points found. Make sure backups are configured and running." }

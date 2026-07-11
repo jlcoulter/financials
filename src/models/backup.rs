@@ -365,9 +365,15 @@ pub async fn list_restore_points(
         });
     }
 
+    // Only show fully-compacted snapshots (level 9) — these are self-contained
+    // restore points. Lower levels are incremental WAL segments that litestream
+    // uses internally; the user shouldn't need to pick them.
+    let mut restore_points: Vec<RestorePoint> =
+        points.into_iter().filter(|p| p.level == 9).collect();
+
     // Sort by timestamp descending (newest first)
-    points.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    Ok(points)
+    restore_points.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(restore_points)
 }
 
 /// Restore the database from a litestream backup.
