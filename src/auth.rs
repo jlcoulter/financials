@@ -5,8 +5,7 @@ use crate::error::AppError;
 use crate::layout::layout;
 use crate::models::user;
 
-use axum::extract::Form;
-use axum::extract::State;
+use axum::extract::{Form, Query, State};
 use axum::response::IntoResponse;
 use axum::response::Redirect;
 use axum_extra::extract::SignedCookieJar;
@@ -18,11 +17,25 @@ pub struct LoginForm {
     password: String,
 }
 
-pub async fn login(State(_state): State<AppState>) -> impl IntoResponse {
+#[derive(Deserialize)]
+pub struct FlashParam {
+    flash: Option<String>,
+}
+
+pub async fn login(
+    State(_state): State<AppState>,
+    Query(params): Query<FlashParam>,
+) -> impl IntoResponse {
+    let flash = params.flash.as_deref();
     layout(
         "Login",
         maud::html! {
             div class="auth-form" {
+                @if let Some(msg) = flash {
+                    @if msg == "restored" {
+                        div class="flash flash-success" { "Database restored from backup. Please log in again." }
+                    }
+                }
                 form action="/login" hx-post="/login" hx-target="#error-box" method="post" {
                     label { "Username" input type="text" name="username"; }
                     label { "Password" input type="password" name="password"; }
