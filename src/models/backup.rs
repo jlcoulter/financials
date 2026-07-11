@@ -305,13 +305,17 @@ fn stop_litestream() {
 
 /// Restore the database from a litestream backup.
 ///
-/// This stops litestream, restores the latest snapshot to a temp file,
-/// replaces the current database, and restarts litestream if it was enabled.
+/// This stops litestream, drains the database connection pool, restores
+/// the latest snapshot to a temp file, replaces the current database,
+/// and signals that the app should restart (so the pool reconnects to
+/// the new file).
+///
+/// Returns `true` if the app should restart to pick up the new database.
 pub async fn restore_from_backup(
     pool: &SqlitePool,
     db_path: &str,
     config_dir: &str,
-) -> Result<(), AppError> {
+) -> Result<bool, AppError> {
     // Find the backup config
     let row: Option<(String,)> = sqlx::query_as("SELECT user_id FROM backup_config LIMIT 1")
         .fetch_optional(pool)
@@ -370,26 +374,36 @@ pub async fn restore_from_backup(
         )));
     }
 
-    // Close the current database connection pool so we can swap the file
-    // We need to close all connections first
     tracing::info!("Restore downloaded successfully, replacing database file");
 
+    // Close all connections in the pool so the file isn't locked.
+    // After this, the pool is permanently closed and cannot be reused.
+    // The app must restart to create a fresh pool.
+    pool.close().await;
+
     // Replace the original database with the restored one
+    // Also remove the WAL and SHM files from the old database
+    let wal_path = format!("{db_path}-wal");
+    let shm_path = format!("{db_path}-shm");
+    let _ = std::fs::remove_file(&wal_path);
+    let _ = std::fs::remove_file(&shm_path);
+
     std::fs::rename(&restore_path, db_path).map_err(|e| {
         // Clean up restore file on error
         let _ = std::fs::remove_file(&restore_path);
         AppError::Internal(e.into())
     })?;
 
-    tracing::info!("Database restored successfully from backup");
+    tracing::info!("Database restored successfully from backup — app restart required");
 
-    // Restart litestream if it was enabled
+    // Restart litestream if it was enabled (it will use the new database
+    // once the app restarts and reconnects)
     if config.enabled {
         tracing::info!("Restarting litestream (was enabled)");
         start_litestream(&config_path);
     }
 
-    Ok(())
+    Ok(true) // Signal that the app should restart
 }
 
 #[cfg(test)]

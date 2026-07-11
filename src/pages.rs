@@ -2972,7 +2972,22 @@ pub async fn settings_backup_restore(
     _user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
     match backup::restore_from_backup(state.db(), &state.db_path, &state.config_dir).await {
-        Ok(()) => Ok(Redirect::to("/settings?flash=restored").into_response()),
+        Ok(needs_restart) => {
+            if needs_restart {
+                // Graceful shutdown — the process manager (or Docker) will restart us.
+                // The database file has been replaced, so on restart the app will
+                // connect to the restored database.
+                tracing::info!("Restore complete, shutting down for restart");
+                // Give the response a moment to be sent, then exit
+                tokio::spawn(async {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    std::process::exit(0);
+                });
+                Ok(Redirect::to("/login?flash=restored").into_response())
+            } else {
+                Ok(Redirect::to("/settings?flash=restored").into_response())
+            }
+        }
         Err(e) => {
             tracing::error!("Restore failed: {e:?}");
             Ok(Redirect::to("/settings?flash=restore_failed").into_response())
