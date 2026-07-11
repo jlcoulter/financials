@@ -3010,7 +3010,7 @@ pub struct RestoreForm {
 
 pub async fn settings_backup_restore(
     State(state): State<AppState>,
-    _user: LoggedInUser,
+    user: LoggedInUser,
     Form(form): Form<RestoreForm>,
 ) -> Result<axum::response::Response, AppError> {
     let ts = form.timestamp.as_deref();
@@ -3025,16 +3025,23 @@ pub async fn settings_backup_restore(
     {
         Ok(needs_restart) => {
             if needs_restart {
-                // Graceful shutdown — the process manager (or Docker) will restart us.
-                // The database file has been replaced, so on restart the app will
-                // connect to the restored database.
+                // The database file has been replaced. We need to exit so the
+                // process manager restarts us with a fresh connection pool.
+                // Show a page telling the user to wait, then exit after a delay.
                 tracing::info!("Restore complete, shutting down for restart");
-                // Give the response a moment to be sent, then exit
                 tokio::spawn(async {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                     std::process::exit(0);
                 });
-                Ok(Redirect::to("/login?flash=restored").into_response())
+                Ok(maud::html! {
+                    (crate::layout::layout("Restore", maud::html! {
+                        div class="flash flash-success" {
+                            "Database restored from backup."
+                        }
+                        p { "The application is restarting to load the restored database. \
+                            Please wait a moment, then " a href="/login" { "click here to log in" } "." }
+                    }, Some(&user)))
+                }.into_response())
             } else {
                 Ok(Redirect::to("/settings?flash=restored").into_response())
             }
