@@ -2,7 +2,7 @@ use crate::error::AppError;
 use sqlx::SqlitePool;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 pub struct BackupConfig {
@@ -378,40 +378,37 @@ pub async fn list_restore_points(
 
 /// Restore the database from a litestream backup.
 ///
-/// This stops litestream, drains the database connection pool, restores
-/// a snapshot to a temp file, replaces the current database,
-/// and signals that the app should restart (so the pool reconnects to
-/// the new file).
+/// This stops litestream, swaps the database file, and reconnects the pool
+/// in-place — no process restart needed.
 ///
 /// If `timestamp` is provided, restores to that point in time (ISO 8601).
 /// If None, restores the latest snapshot.
-///
-/// Returns `true` if the app should restart to pick up the new database.
 pub async fn restore_from_backup(
-    pool: &SqlitePool,
+    db: &Arc<RwLock<SqlitePool>>,
     db_path: &str,
     config_dir: &str,
-    litestream_child: &Arc<Mutex<Option<tokio::process::Child>>>,
+    litestream_child: &Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
     timestamp: Option<&str>,
-) -> Result<bool, AppError> {
+) -> Result<(), AppError> {
     // Find the backup config
+    let pool = db.read().await;
     let row: Option<(String,)> = sqlx::query_as("SELECT user_id FROM backup_config LIMIT 1")
-        .fetch_optional(pool)
+        .fetch_optional(&*pool)
         .await?;
-
     let user_id_str = row
         .ok_or_else(|| AppError::BadRequest("No backup configuration found".into()))?
         .0;
     let uid = Uuid::parse_str(&user_id_str).map_err(|e| AppError::Internal(e.into()))?;
-    let config = get_config(pool, uid)
+    let config = get_config(&pool, uid)
         .await?
         .ok_or_else(|| AppError::BadRequest("No backup configuration found".into()))?;
+    drop(pool); // Release read lock before long operations
 
     // Stop litestream before restoring
     tracing::info!("Stopping litestream before restore");
     stop_litestream(litestream_child).await;
 
-    // Write a temporary litestream config for the restore
+    // Write litestream config
     let yaml = generate_litestream_yaml(db_path, &config);
     let config_path = format!("{config_dir}/litestream.yml");
     std::fs::write(&config_path, &yaml).map_err(|e| AppError::Internal(e.into()))?;
@@ -462,34 +459,45 @@ pub async fn restore_from_backup(
 
     tracing::info!("Restore downloaded successfully, replacing database file");
 
-    // Close all connections in the pool so the file isn't locked.
-    // After this, the pool is permanently closed and cannot be reused.
-    // The app must restart to create a fresh pool.
-    pool.close().await;
+    // Close all connections in the pool
+    let mut pool_guard = db.write().await;
+    pool_guard.close().await;
 
-    // Replace the original database with the restored one
-    // Also remove the WAL and SHM files from the old database
+    // Remove WAL/SHM from old database
     let wal_path = format!("{db_path}-wal");
     let shm_path = format!("{db_path}-shm");
     let _ = std::fs::remove_file(&wal_path);
     let _ = std::fs::remove_file(&shm_path);
 
+    // Swap the database file
     std::fs::rename(&restore_path, db_path).map_err(|e| {
-        // Clean up restore file on error
         let _ = std::fs::remove_file(&restore_path);
         AppError::Internal(e.into())
     })?;
 
-    tracing::info!("Database restored successfully from backup — app restart required");
+    tracing::info!("Database file swapped, reconnecting pool");
 
-    // Restart litestream if it was enabled (it will use the new database
-    // once the app restarts and reconnects)
+    // Create a new pool connected to the restored database
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(db_path)
+        .create_if_missing(false);
+    let new_pool = SqlitePool::connect_with(options)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    // Replace the pool in the RwLock
+    *pool_guard = new_pool;
+    drop(pool_guard);
+
+    tracing::info!("Database restored and pool reconnected");
+
+    // Restart litestream if it was enabled
     if config.enabled {
         tracing::info!("Restarting litestream (was enabled)");
         start_litestream(&config_path, litestream_child).await;
     }
 
-    Ok(true) // Signal that the app should restart
+    Ok(())
 }
 
 #[cfg(test)]

@@ -14,20 +14,21 @@ pub mod utils;
 
 use axum_extra::extract::cookie::Key;
 use sqlx::SqlitePool;
-use tokio::sync::Mutex;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: SqlitePool,
+    pub db: Arc<RwLock<SqlitePool>>,
     pub key: Key,
     pub db_path: String,
     pub config_dir: String,
     /// Tracked litestream child process, so we can kill it on shutdown.
-    pub litestream_child: std::sync::Arc<Mutex<Option<tokio::process::Child>>>,
+    pub litestream_child: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
 }
 
 impl AppState {
-    pub fn db(&self) -> &SqlitePool {
-        &self.db
+    pub async fn db(&self) -> SqlitePool {
+        self.db.read().await.clone()
     }
 }
