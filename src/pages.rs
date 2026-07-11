@@ -2719,15 +2719,8 @@ pub async fn settings(
         None => None,
     };
 
-    // Fetch available restore points (only if backup is configured)
-    let restore_points = if config.is_some() {
-        backup::list_restore_points(&state.db_path, &state.config_dir)
-            .await
-            .ok()
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
+    // Restore points are loaded asynchronously via HTMX
+    // to avoid blocking the settings page on litestream ltx (which hits B2)
 
     Ok(layout(
         "Settings",
@@ -2845,21 +2838,12 @@ pub async fn settings(
                     }
 
                     form action="/settings/backup/restore" method="post" class="settings-form" {
-                        @if !restore_points.is_empty() {
+                        @if config.is_some() {
                             div class="form-group" {
                                 label { "Restore point"
-                                    select name="timestamp" {
-                                        option value="" { "Latest (most recent backup)" }
-                                        @for point in &restore_points {
-                                            @let size_kb = point.size as f64 / 1024.0;
-                                            @let size_str = if size_kb >= 1024.0 {
-                                                format!("{:.1} MB", size_kb / 1024.0)
-                                            } else {
-                                                format!("{:.0} KB", size_kb)
-                                            };
-                                            option value=(point.timestamp) {
-                                                (format!("{} — {}", point.timestamp, size_str))
-                                            }
+                                    div id="restore-points" hx-get="/settings/backup/restore-points" hx-trigger="load" hx-swap="innerHTML" {
+                                        select name="timestamp" disabled {
+                                            option { "Loading..." }
                                         }
                                     }
                                 }
@@ -2867,7 +2851,7 @@ pub async fn settings(
                                     Choose the snapshot you want to restore to, or select Latest for the most recent." }
                             }
                         } @else {
-                            p class="form-hint" { "No restore points found. Make sure backups are configured and running." }
+                            p class="form-hint" { "No backup configuration found. Configure backups first." }
                         }
                         div class="settings-actions" {
                             button type="submit" class="btn btn-ghost" { "Restore from Backup" }
@@ -3060,4 +3044,32 @@ pub async fn settings_backup_restore(
             Ok(Redirect::to("/settings?flash=restore_failed").into_response())
         }
     }
+}
+
+/// HTMX endpoint: returns the restore point dropdown HTML asynchronously.
+/// This avoids blocking the settings page on `litestream ltx` which hits B2.
+pub async fn settings_backup_restore_points(
+    State(state): State<AppState>,
+    _user: LoggedInUser,
+) -> Result<maud::Markup, AppError> {
+    let points = backup::list_restore_points(&state.db_path, &state.config_dir)
+        .await
+        .unwrap_or_default();
+
+    Ok(maud::html! {
+        select name="timestamp" {
+            option value="" { "Latest (most recent backup)" }
+            @for point in &points {
+                @let size_kb = point.size as f64 / 1024.0;
+                @let size_str = if size_kb >= 1024.0 {
+                    format!("{:.1} MB", size_kb / 1024.0)
+                } else {
+                    format!("{:.0} KB", size_kb)
+                };
+                option value=(point.timestamp) {
+                    (format!("{} — {}", point.timestamp, size_str))
+                }
+            }
+        }
+    })
 }
