@@ -2816,7 +2816,7 @@ pub async fn settings(
 
             div id="restore" class="tab-content" style="display:none" {
                 h3 { "Restore from Backup" }
-                p { "Restore your database from the latest litestream backup snapshot. \
+                p { "Restore your database from a litestream backup. \
                      This will replace your current database with the backup version." }
 
                 @if config.is_some() {
@@ -2831,10 +2831,17 @@ pub async fn settings(
 
                     div class="flash flash-warning" {
                         "Warning: This will replace your current database with the backup. \
-                         Any changes made since the last backup will be lost."
+                         Any changes made since the backup point will be lost."
                     }
 
                     form action="/settings/backup/restore" method="post" class="settings-form" {
+                        div class="form-group" {
+                            label { "Point in time (optional)"
+                                input type="text" name="timestamp" placeholder="e.g. 2026-07-11T11:30:00+10:00";
+                            }
+                            p class="form-hint" { "Leave blank to restore the latest backup. \
+                                Use ISO 8601 format to restore to a specific point in time." }
+                        }
                         div class="settings-actions" {
                             button type="submit" class="btn btn-ghost" { "Restore from Backup" }
                         }
@@ -2985,15 +2992,23 @@ pub async fn settings_backup_disable(
     Ok(Redirect::to("/settings?flash=disabled").into_response())
 }
 
+#[derive(serde::Deserialize)]
+pub struct RestoreForm {
+    pub timestamp: Option<String>,
+}
+
 pub async fn settings_backup_restore(
     State(state): State<AppState>,
     _user: LoggedInUser,
+    Form(form): Form<RestoreForm>,
 ) -> Result<axum::response::Response, AppError> {
+    let ts = form.timestamp.as_deref();
     match backup::restore_from_backup(
         state.db(),
         &state.db_path,
         &state.config_dir,
         &state.litestream_child,
+        ts,
     )
     .await
     {
