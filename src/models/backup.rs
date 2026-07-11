@@ -310,6 +310,66 @@ pub async fn stop_litestream(
     }
 }
 
+/// A restore point parsed from `litestream ltx` output.
+#[derive(Debug, Clone)]
+pub struct RestorePoint {
+    pub timestamp: String,
+    pub size: u64,
+    pub level: u8,
+}
+
+/// List available restore points by querying litestream.
+/// Returns snapshots from `litestream ltx -level all`, parsed into (timestamp, size, level).
+pub async fn list_restore_points(
+    db_path: &str,
+    config_dir: &str,
+) -> Result<Vec<RestorePoint>, AppError> {
+    let config_path = format!("{config_dir}/litestream.yml");
+    let output = tokio::process::Command::new("litestream")
+        .args(["ltx", "-config", &config_path, "-level", "all", db_path])
+        .output()
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to run litestream ltx: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "litestream ltx failed: {stderr}"
+        )));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut points = Vec::new();
+
+    // Parse tabular output:
+    // level  min_txid          max_txid          size   created
+    // 0      0000000000000006  0000000000000006  75215  2026-07-11T01:27:52Z
+    for line in stdout.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 5 {
+            continue;
+        }
+        let level: u8 = match parts[0].parse() {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let size: u64 = match parts[3].parse() {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let timestamp = parts[4].to_string();
+        points.push(RestorePoint {
+            timestamp,
+            size,
+            level,
+        });
+    }
+
+    // Sort by timestamp descending (newest first)
+    points.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(points)
+}
+
 /// Restore the database from a litestream backup.
 ///
 /// This stops litestream, drains the database connection pool, restores
