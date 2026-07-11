@@ -313,9 +313,12 @@ pub async fn stop_litestream(
 /// Restore the database from a litestream backup.
 ///
 /// This stops litestream, drains the database connection pool, restores
-/// the latest snapshot to a temp file, replaces the current database,
+/// a snapshot to a temp file, replaces the current database,
 /// and signals that the app should restart (so the pool reconnects to
 /// the new file).
+///
+/// If `timestamp` is provided, restores to that point in time (ISO 8601).
+/// If None, restores the latest snapshot.
 ///
 /// Returns `true` if the app should restart to pick up the new database.
 pub async fn restore_from_backup(
@@ -323,6 +326,7 @@ pub async fn restore_from_backup(
     db_path: &str,
     config_dir: &str,
     litestream_child: &Arc<Mutex<Option<tokio::process::Child>>>,
+    timestamp: Option<&str>,
 ) -> Result<bool, AppError> {
     // Find the backup config
     let row: Option<(String,)> = sqlx::query_as("SELECT user_id FROM backup_config LIMIT 1")
@@ -356,17 +360,25 @@ pub async fn restore_from_backup(
         .to_string();
     let restore_path = format!("{db_dir}/data.db.restore");
 
-    tracing::info!("Restoring database from backup to {restore_path}");
+    // Build the litestream restore command
+    let mut args = vec![
+        "restore".to_string(),
+        "-config".to_string(),
+        config_path.clone(),
+        "-o".to_string(),
+        restore_path.clone(),
+    ];
+    if let Some(ts) = timestamp {
+        tracing::info!("Restoring database from backup to {restore_path} (timestamp: {ts})");
+        args.push("-timestamp".to_string());
+        args.push(ts.to_string());
+    } else {
+        tracing::info!("Restoring database from backup to {restore_path} (latest)");
+    }
+    args.push(db_path.to_string());
 
     let output = tokio::process::Command::new("litestream")
-        .args([
-            "restore",
-            "-config",
-            &config_path,
-            "-o",
-            &restore_path,
-            db_path,
-        ])
+        .args(&args)
         .output()
         .await
         .map_err(|e| AppError::Internal(e.into()))?;

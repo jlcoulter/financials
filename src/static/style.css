@@ -1007,3 +1007,8 @@ th.th--debt {
     color: var(--text-muted, #d8dee9);
     font-size: 0.9rem;
 }
+.form-hint {
+    margin: 0.25em 0 0;
+    color: var(--text-muted, #d8dee9);
+    font-size: 0.8rem;
+}
