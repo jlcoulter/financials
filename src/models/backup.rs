@@ -1,6 +1,8 @@
 use crate::error::AppError;
 use sqlx::SqlitePool;
 use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 pub struct BackupConfig {
@@ -224,6 +226,7 @@ pub async fn sync_litestream(
     pool: &SqlitePool,
     db_path: &str,
     config_dir: &str,
+    litestream_child: &Arc<Mutex<Option<tokio::process::Child>>>,
 ) -> Result<(), AppError> {
     // Find any enabled config — single-user app, so user_id doesn't matter
     let row: Option<(String,)> =
@@ -247,11 +250,11 @@ pub async fn sync_litestream(
             std::fs::write(&config_path, &yaml).map_err(|e| AppError::Internal(e.into()))?;
 
             // Try to start litestream replicate as a background process
-            start_litestream(&config_path);
+            start_litestream(&config_path, litestream_child).await;
         }
         None => {
             tracing::info!("No enabled backup config — stopping litestream and removing config");
-            stop_litestream();
+            stop_litestream(litestream_child).await;
             if Path::new(&config_path).exists() {
                 tracing::info!("Removing {}", config_path);
                 let _ = std::fs::remove_file(&config_path);
@@ -264,9 +267,13 @@ pub async fn sync_litestream(
 
 /// Start litestream replicate as a background process.
 /// If litestream is not installed, logs a warning instead of failing.
-fn start_litestream(config_path: &str) {
-    // Kill any existing litestream process first
-    stop_litestream();
+/// The child process is stored in `litestream_child` so it can be killed on shutdown.
+pub async fn start_litestream(
+    config_path: &str,
+    litestream_child: &std::sync::Arc<Mutex<Option<tokio::process::Child>>>,
+) {
+    // Kill any existing litestream process we spawned first
+    stop_litestream(litestream_child).await;
 
     match tokio::process::Command::new("litestream")
         .arg("replicate")
@@ -276,6 +283,8 @@ fn start_litestream(config_path: &str) {
     {
         Ok(child) => {
             tracing::info!("Litestream process started (PID {:?})", child.id());
+            let mut guard = litestream_child.lock().await;
+            *guard = Some(child);
         }
         Err(e) => {
             tracing::warn!(
@@ -286,20 +295,18 @@ fn start_litestream(config_path: &str) {
     }
 }
 
-/// Stop any running litestream replicate process.
-fn stop_litestream() {
-    match std::process::Command::new("pkill")
-        .args(["-f", "litestream replicate"])
-        .output()
-    {
-        Ok(output) => {
-            if output.status.success() {
-                tracing::info!("Stopped existing litestream process");
-            }
+/// Stop the litestream child process we spawned.
+pub async fn stop_litestream(
+    litestream_child: &std::sync::Arc<Mutex<Option<tokio::process::Child>>>,
+) {
+    let mut guard = litestream_child.lock().await;
+    if let Some(mut child) = guard.take() {
+        match child.kill().await {
+            Ok(()) => tracing::info!("Stopped litestream process (PID {:?})", child.id()),
+            Err(e) => tracing::warn!("Failed to stop litestream process: {e}"),
         }
-        Err(_) => {
-            tracing::debug!("pkill not available or no litestream process found");
-        }
+        // Wait so the process is reaped; ignore errors (already dead)
+        let _ = child.wait().await;
     }
 }
 
@@ -315,6 +322,7 @@ pub async fn restore_from_backup(
     pool: &SqlitePool,
     db_path: &str,
     config_dir: &str,
+    litestream_child: &Arc<Mutex<Option<tokio::process::Child>>>,
 ) -> Result<bool, AppError> {
     // Find the backup config
     let row: Option<(String,)> = sqlx::query_as("SELECT user_id FROM backup_config LIMIT 1")
@@ -331,7 +339,7 @@ pub async fn restore_from_backup(
 
     // Stop litestream before restoring
     tracing::info!("Stopping litestream before restore");
-    stop_litestream();
+    stop_litestream(litestream_child).await;
 
     // Write a temporary litestream config for the restore
     let yaml = generate_litestream_yaml(db_path, &config);
@@ -400,7 +408,7 @@ pub async fn restore_from_backup(
     // once the app restarts and reconnects)
     if config.enabled {
         tracing::info!("Restarting litestream (was enabled)");
-        start_litestream(&config_path);
+        start_litestream(&config_path, litestream_child).await;
     }
 
     Ok(true) // Signal that the app should restart

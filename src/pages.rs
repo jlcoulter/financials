@@ -2941,7 +2941,13 @@ pub async fn settings_backup_post(
 
     // If the config is enabled, sync litestream immediately
     if config.enabled
-        && let Err(e) = backup::sync_litestream(state.db(), &state.db_path, &state.config_dir).await
+        && let Err(e) = backup::sync_litestream(
+            state.db(),
+            &state.db_path,
+            &state.config_dir,
+            &state.litestream_child,
+        )
+        .await
     {
         tracing::error!("Failed to sync litestream after saving config: {e:?}");
     }
@@ -2954,7 +2960,13 @@ pub async fn settings_backup_enable(
     user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
     backup::set_enabled(state.db(), user.0, true).await?;
-    backup::sync_litestream(state.db(), &state.db_path, &state.config_dir).await?;
+    backup::sync_litestream(
+        state.db(),
+        &state.db_path,
+        &state.config_dir,
+        &state.litestream_child,
+    )
+    .await?;
     Ok(Redirect::to("/settings?flash=enabled").into_response())
 }
 
@@ -2963,7 +2975,13 @@ pub async fn settings_backup_disable(
     user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
     backup::set_enabled(state.db(), user.0, false).await?;
-    backup::sync_litestream(state.db(), &state.db_path, &state.config_dir).await?;
+    backup::sync_litestream(
+        state.db(),
+        &state.db_path,
+        &state.config_dir,
+        &state.litestream_child,
+    )
+    .await?;
     Ok(Redirect::to("/settings?flash=disabled").into_response())
 }
 
@@ -2971,7 +2989,14 @@ pub async fn settings_backup_restore(
     State(state): State<AppState>,
     _user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
-    match backup::restore_from_backup(state.db(), &state.db_path, &state.config_dir).await {
+    match backup::restore_from_backup(
+        state.db(),
+        &state.db_path,
+        &state.config_dir,
+        &state.litestream_child,
+    )
+    .await
+    {
         Ok(needs_restart) => {
             if needs_restart {
                 // Graceful shutdown — the process manager (or Docker) will restart us.

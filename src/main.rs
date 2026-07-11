@@ -6,6 +6,7 @@ use std::str::FromStr;
 use axum::Router;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
+use tokio::sync::Mutex;
 use tower_http::services::ServeDir;
 
 #[tokio::main]
@@ -27,24 +28,39 @@ async fn main() -> anyhow::Result<()> {
     sqlx::migrate!().run(&db).await?;
 
     let key = axum_extra::extract::cookie::Key::generate();
+    let litestream_child = std::sync::Arc::new(Mutex::new(None));
     let state = AppState {
         db: db.clone(),
         key,
         db_path: db_path.clone(),
         config_dir: config_dir.clone(),
+        litestream_child: litestream_child.clone(),
     };
 
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "src/static".to_string());
 
     // If backups are enabled, start litestream on startup
-    if let Err(e) = rust_web::models::backup::sync_litestream(&db, &db_path, &config_dir).await {
+    if let Err(e) =
+        rust_web::models::backup::sync_litestream(&db, &db_path, &config_dir, &litestream_child)
+            .await
+    {
         tracing::warn!("Failed to sync litestream on startup: {e:?}");
     }
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     tracing::info!("listening on {}", listener.local_addr().unwrap());
 
-    axum::serve(listener, app(state, static_dir)).await?;
+    let litestream_for_shutdown = litestream_child.clone();
+    axum::serve(listener, app(state, static_dir))
+        .with_graceful_shutdown(async move {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("failed to listen for ctrl+c");
+            tracing::info!("Shutting down...");
+            // Kill litestream on shutdown so it doesn't outlive the app
+            rust_web::models::backup::stop_litestream(&litestream_for_shutdown).await;
+        })
+        .await?;
 
     Ok(())
 }
