@@ -2719,6 +2719,16 @@ pub async fn settings(
         None => None,
     };
 
+    // Fetch available restore points (only if backup is configured)
+    let restore_points = if config.is_some() {
+        backup::list_restore_points(&state.db_path, &state.config_dir)
+            .await
+            .ok()
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
     Ok(layout(
         "Settings",
         maud::html! {
@@ -2835,12 +2845,31 @@ pub async fn settings(
                     }
 
                     form action="/settings/backup/restore" method="post" class="settings-form" {
-                        div class="form-group" {
-                            label { "Point in time (optional)"
-                                input type="text" name="timestamp" placeholder="e.g. 2026-07-11T11:30:00+10:00";
+                        @if !restore_points.is_empty() {
+                            div class="form-group" {
+                                label { "Restore point"
+                                    select name="timestamp" {
+                                        option value="" { "Latest (most recent backup)" }
+                                        @for point in &restore_points {
+                                            @let size_kb = point.size as f64 / 1024.0;
+                                            @let size_str = if size_kb >= 1024.0 {
+                                                format!("{:.1} MB", size_kb / 1024.0)
+                                            } else {
+                                                format!("{:.0} KB", size_kb)
+                                            };
+                                            @let label = format!("{} ({} KB, level {})", point.timestamp, size_str, point.level);
+                                            option value=(point.timestamp) {
+                                                (label)
+                                            }
+                                        }
+                                    }
+                                }
+                                p class="form-hint" { "Select a point in time to restore from. \
+                                    Level 9 entries are full snapshots; lower levels are incremental WAL segments. \
+                                    For best results, choose a level 9 snapshot that is large (your full data)." }
                             }
-                            p class="form-hint" { "Leave blank to restore the latest backup. \
-                                Use ISO 8601 format to restore to a specific point in time." }
+                        } @else {
+                            p class="form-hint" { "No restore points found. Make sure backups are configured and running." }
                         }
                         div class="settings-actions" {
                             button type="submit" class="btn btn-ghost" { "Restore from Backup" }
