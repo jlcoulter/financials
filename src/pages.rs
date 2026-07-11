@@ -3066,8 +3066,11 @@ pub async fn settings_backup_restore_points(
                 } else {
                     format!("{:.0} KB", size_kb)
                 };
+                @let display_ts = chrono::DateTime::parse_from_rfc3339(&point.timestamp)
+                    .map(|dt| dt.with_timezone(&chrono::Local).format("%d %b %Y, %I:%M %p").to_string())
+                    .unwrap_or_else(|_| point.timestamp.clone());
                 option value=(point.timestamp) {
-                    (format!("{} — {}", point.timestamp, size_str))
+                    (format!("{} — {}", display_ts, size_str))
                 }
             }
         }
