@@ -338,6 +338,7 @@ pub async fn restore_from_backup(
     let db_path_buf = Path::new(db_path);
     let db_dir = db_path_buf
         .parent()
+        .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."))
         .to_string_lossy()
         .to_string();
@@ -359,9 +360,13 @@ pub async fn restore_from_backup(
         .map_err(|e| AppError::Internal(e.into()))?;
 
     if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
+        let status = output.status;
+        // Clean up partial restore file
+        let _ = std::fs::remove_file(&restore_path);
         return Err(AppError::Internal(anyhow::anyhow!(
-            "litestream restore failed: {stderr}"
+            "litestream restore failed (exit {status}): stdout={stdout} stderr={stderr}"
         )));
     }
 
