@@ -5,6 +5,53 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
+/// RAII guard that ensures the litestream child process is killed when dropped.
+///
+/// This covers cleanup on panic, unexpected errors, and any exit path that
+/// doesn't go through the graceful-shutdown handler.
+///
+/// The graceful-shutdown path calls `stop_litestream` (which does a proper
+/// async kill + wait). This Drop guard is a safety net for all other exit
+/// paths — it performs a synchronous SIGKILL only, which is sufficient to
+/// prevent the child from outliving the parent process.
+pub struct LitestreamGuard {
+    child: Arc<Mutex<Option<tokio::process::Child>>>,
+}
+
+impl LitestreamGuard {
+    pub fn new(child: Arc<Mutex<Option<tokio::process::Child>>>) -> Self {
+        Self { child }
+    }
+}
+
+impl Drop for LitestreamGuard {
+    fn drop(&mut self) {
+        // Synchronous safety-net kill. The graceful-shutdown handler already
+        // calls `stop_litestream` for normal exits; this handles panics,
+        // unwrap failures, SIGKILL of the parent, etc.
+        if let Ok(mut guard) = self.child.try_lock() {
+            if let Some(ref mut proc) = *guard {
+                if let Some(pid) = proc.id() {
+                    #[cfg(unix)]
+                    {
+                        unsafe {
+                            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+                        }
+                        eprintln!("LitestreamGuard: sent SIGKILL to litestream PID {pid}");
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        let _ = std::process::Command::new("kill")
+                            .args(["-9", &pid.to_string()])
+                            .output();
+                        eprintln!("LitestreamGuard: sent kill -9 to litestream PID {pid}");
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub struct BackupConfig {
     pub id: Uuid,
     pub user_id: Uuid,
