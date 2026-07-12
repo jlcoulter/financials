@@ -173,7 +173,7 @@ pub async fn list_all_snapshots(config: &BackupConfig) -> Result<Vec<Snapshot>, 
         snapshots.push(Snapshot {
             key,
             timestamp,
-            size: meta.size as u64,
+            size: meta.size,
             instance_id,
         });
     }
@@ -228,7 +228,7 @@ pub async fn list_snapshots(config: &BackupConfig) -> Result<Vec<Snapshot>, AppE
         snapshots.push(Snapshot {
             key,
             timestamp,
-            size: meta.size as u64,
+            size: meta.size,
             instance_id: config.db_instance_id.clone(),
         });
     }
