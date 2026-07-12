@@ -9,6 +9,7 @@ use axum_extra::extract::cookie::Cookie;
 use axum_extra::extract::cookie::Key;
 use uuid::Uuid;
 
+/// Extractor that requires a valid logged-in session.
 pub struct LoggedInUser(pub Uuid);
 
 impl FromRef<AppState> for Key {

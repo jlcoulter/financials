@@ -41,6 +41,15 @@ impl From<bcrypt::BcryptError> for AppError {
     }
 }
 
+impl From<AppError> for anyhow::Error {
+    fn from(err: AppError) -> Self {
+        match err {
+            AppError::Internal(e) => e,
+            other => anyhow::anyhow!("{:?}", other),
+        }
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
