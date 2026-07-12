@@ -1,60 +1,14 @@
 use crate::error::AppError;
+use futures::StreamExt;
+use object_store::path::Path as ObjectPath;
+use object_store::{ObjectStore, ObjectStoreExt};
 use sqlx::SqlitePool;
-use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use uuid::Uuid;
-
-/// RAII guard that ensures the litestream child process is killed when dropped.
-///
-/// This covers cleanup on panic, unexpected errors, and any exit path that
-/// doesn't go through the graceful-shutdown handler.
-///
-/// The graceful-shutdown path calls `stop_litestream` (which does a proper
-/// async kill + wait). This Drop guard is a safety net for all other exit
-/// paths — it performs a synchronous SIGKILL only, which is sufficient to
-/// prevent the child from outliving the parent process.
-pub struct LitestreamGuard {
-    child: Arc<Mutex<Option<tokio::process::Child>>>,
-}
-
-impl LitestreamGuard {
-    pub fn new(child: Arc<Mutex<Option<tokio::process::Child>>>) -> Self {
-        Self { child }
-    }
-}
-
-impl Drop for LitestreamGuard {
-    fn drop(&mut self) {
-        // Synchronous safety-net kill. The graceful-shutdown handler already
-        // calls `stop_litestream` for normal exits; this handles panics,
-        // unwrap failures, SIGKILL of the parent, etc.
-        if let Ok(mut guard) = self.child.try_lock() {
-            if let Some(ref mut proc) = *guard {
-                if let Some(pid) = proc.id() {
-                    #[cfg(unix)]
-                    {
-                        unsafe {
-                            libc::kill(pid as libc::pid_t, libc::SIGKILL);
-                        }
-                        eprintln!("LitestreamGuard: sent SIGKILL to litestream PID {pid}");
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        let _ = std::process::Command::new("kill")
-                            .args(["-9", &pid.to_string()])
-                            .output();
-                        eprintln!("LitestreamGuard: sent kill -9 to litestream PID {pid}");
-                    }
-                }
-            }
-        }
-    }
-}
 
 pub struct BackupConfig {
     pub id: Uuid,
-    pub user_id: Uuid,
     pub provider: String,
     pub bucket: String,
     pub path: String,
@@ -66,445 +20,343 @@ pub struct BackupConfig {
     pub b2_application_key: Option<String>,
     pub b2_endpoint: Option<String>,
     pub enabled: bool,
+    /// Unique per database instance. Appended to the backup path so that
+    /// a fresh DB doesn't collide with snapshots from a previous instance.
+    pub db_instance_id: Option<String>,
+    /// How often to automatically create snapshots, in minutes.
+    pub interval_minutes: i64,
+    /// Maximum number of snapshots to keep in the bucket.
+    /// Oldest snapshots are pruned after each upload.
+    pub max_snapshots: i64,
 }
 
-pub async fn get_config(
-    pool: &SqlitePool,
-    user_id: Uuid,
-) -> Result<Option<BackupConfig>, AppError> {
-    let row = sqlx::query_as::<_, (String, String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool)>(
-        "SELECT id, provider, bucket, path, region, endpoint, access_key_id, secret_access_key, b2_key_id, b2_application_key, b2_endpoint, enabled FROM backup_config WHERE user_id = ?",
-    )
-    .bind(user_id.to_string())
-    .fetch_optional(pool)
-    .await?;
-
-    match row {
-        Some((
-            id_str,
-            provider,
-            bucket,
-            path,
-            region,
-            endpoint,
-            access_key_id,
-            secret_access_key,
-            b2_key_id,
-            b2_application_key,
-            b2_endpoint,
-            enabled,
-        )) => {
-            let id = Uuid::parse_str(&id_str)?;
-            Ok(Some(BackupConfig {
-                id,
-                user_id,
-                provider,
-                bucket,
-                path,
-                region,
-                endpoint,
-                access_key_id,
-                secret_access_key,
-                b2_key_id,
-                b2_application_key,
-                b2_endpoint,
-                enabled,
-            }))
-        }
-        None => Ok(None),
-    }
-}
-
-pub async fn save_config(
-    pool: &SqlitePool,
-    user_id: Uuid,
-    config: &BackupConfig,
-) -> Result<(), AppError> {
-    let existing = sqlx::query("SELECT id FROM backup_config WHERE user_id = ?")
-        .bind(user_id.to_string())
-        .fetch_optional(pool)
-        .await?;
-
-    if existing.is_some() {
-        sqlx::query(
-            "UPDATE backup_config SET provider = ?, bucket = ?, path = ?, region = ?, endpoint = ?, \
-             access_key_id = ?, secret_access_key = ?, b2_key_id = ?, b2_application_key = ?, \
-             b2_endpoint = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
-        )
-        .bind(&config.provider)
-        .bind(&config.bucket)
-        .bind(&config.path)
-        .bind(&config.region)
-        .bind(&config.endpoint)
-        .bind(&config.access_key_id)
-        .bind(&config.secret_access_key)
-        .bind(&config.b2_key_id)
-        .bind(&config.b2_application_key)
-        .bind(&config.b2_endpoint)
-        .bind(config.enabled)
-        .bind(user_id.to_string())
-        .execute(pool)
-        .await?;
-    } else {
-        let id = Uuid::now_v7();
-        sqlx::query(
-            "INSERT INTO backup_config (id, user_id, provider, bucket, path, region, endpoint, \
-             access_key_id, secret_access_key, b2_key_id, b2_application_key, b2_endpoint, enabled) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(id.to_string())
-        .bind(user_id.to_string())
-        .bind(&config.provider)
-        .bind(&config.bucket)
-        .bind(&config.path)
-        .bind(&config.region)
-        .bind(&config.endpoint)
-        .bind(&config.access_key_id)
-        .bind(&config.secret_access_key)
-        .bind(&config.b2_key_id)
-        .bind(&config.b2_application_key)
-        .bind(&config.b2_endpoint)
-        .bind(config.enabled)
-        .execute(pool)
-        .await?;
-    }
-
-    Ok(())
-}
-
-pub async fn set_enabled(pool: &SqlitePool, user_id: Uuid, enabled: bool) -> Result<(), AppError> {
-    let result = sqlx::query(
-        "UPDATE backup_config SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
-    )
-    .bind(enabled)
-    .bind(user_id.to_string())
-    .execute(pool)
-    .await?;
-
-    if result.rows_affected() == 0 {
-        return Err(AppError::BadRequest("No backup config found".into()));
-    }
-    Ok(())
-}
-
-/// Generate a litestream YAML config from the stored backup config.
-///
-/// Uses litestream's expanded replica format (type, bucket, path, etc.)
-/// rather than URL format — the URL format doesn't reliably pass auth
-/// credentials to the S3 client.
-///
-/// B2 uses the S3-compatible API — litestream does not support `b2://` URLs.
-/// B2 configs use `type: s3` with the B2 S3 endpoint and B2 key ID /
-/// application key as access-key-id / secret-access-key.
-pub fn generate_litestream_yaml(db_path: &str, config: &BackupConfig) -> String {
-    let mut yaml = String::new();
-    yaml.push_str("dbs:\n");
-    yaml.push_str(&format!("  - path: {}\n", db_path));
-    yaml.push_str("    replicas:\n");
-
-    match config.provider.as_str() {
+/// Build an `object_store` S3 client from the stored backup config.
+/// Works for both S3 and B2 (which uses an S3-compatible API).
+fn build_object_store(config: &BackupConfig) -> Result<Arc<dyn ObjectStore>, AppError> {
+    let (access_key, secret_key, endpoint) = match config.provider.as_str() {
         "b2" => {
-            // B2 uses S3-compatible API in litestream
-            let endpoint = config
+            let key = config.b2_key_id.as_deref().unwrap_or("").to_string();
+            let secret = config
+                .b2_application_key
+                .as_deref()
+                .unwrap_or("")
+                .to_string();
+            let ep = config
                 .b2_endpoint
                 .as_deref()
                 .unwrap_or("s3.us-west-004.backblazeb2.com");
-
-            yaml.push_str("      - type: s3\n");
-            yaml.push_str(&format!("        bucket: {}\n", config.bucket));
-            if !config.path.is_empty() {
-                yaml.push_str(&format!(
-                    "        path: {}\n",
-                    config.path.trim_end_matches('/')
-                ));
-            }
-            // Ensure endpoint has https:// prefix
-            if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
-                yaml.push_str(&format!("        endpoint: {}\n", endpoint));
+            // Ensure endpoint has https://
+            let endpoint_url = if ep.starts_with("http://") || ep.starts_with("https://") {
+                ep.to_string()
             } else {
-                yaml.push_str(&format!("        endpoint: https://{}\n", endpoint));
-            }
-            yaml.push_str(&format!("        region: {}\n", config.region));
-            yaml.push_str(&format!(
-                "        access-key-id: {}\n",
-                config.b2_key_id.as_deref().unwrap_or("")
-            ));
-            yaml.push_str(&format!(
-                "        secret-access-key: {}\n",
-                config.b2_application_key.as_deref().unwrap_or("")
-            ));
+                format!("https://{ep}")
+            };
+            (key, secret, endpoint_url)
         }
         _ => {
             // S3 or other S3-compatible storage
-            yaml.push_str("      - type: s3\n");
-            yaml.push_str(&format!("        bucket: {}\n", config.bucket));
-            if !config.path.is_empty() {
-                yaml.push_str(&format!(
-                    "        path: {}\n",
-                    config.path.trim_end_matches('/')
-                ));
-            }
-            if let Some(endpoint) = &config.endpoint {
-                if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
-                    yaml.push_str(&format!("        endpoint: {}\n", endpoint));
+            let key = config.access_key_id.as_deref().unwrap_or("").to_string();
+            let secret = config
+                .secret_access_key
+                .as_deref()
+                .unwrap_or("")
+                .to_string();
+            let endpoint_url = config.endpoint.as_deref().map(|ep| {
+                if ep.starts_with("http://") || ep.starts_with("https://") {
+                    ep.to_string()
                 } else {
-                    yaml.push_str(&format!("        endpoint: https://{}\n", endpoint));
+                    format!("https://{ep}")
                 }
-            }
-            yaml.push_str(&format!("        region: {}\n", config.region));
-            yaml.push_str(&format!(
-                "        access-key-id: {}\n",
-                config.access_key_id.as_deref().unwrap_or("")
-            ));
-            yaml.push_str(&format!(
-                "        secret-access-key: {}\n",
-                config.secret_access_key.as_deref().unwrap_or("")
-            ));
+            });
+            (key, secret, endpoint_url.unwrap_or_default())
         }
+    };
+
+    let mut builder = object_store::aws::AmazonS3Builder::new()
+        .with_bucket_name(&config.bucket)
+        .with_region(&config.region)
+        .with_access_key_id(&access_key)
+        .with_secret_access_key(&secret_key);
+
+    if !endpoint.is_empty() {
+        builder = builder.with_endpoint(endpoint);
     }
 
-    yaml
+    // B2 and many S3-compatible stores need path-style and allow HTTP
+    if config.provider == "b2" {
+        builder = builder.with_allow_http(true);
+    }
+    // Custom endpoints (MinIO, etc.) also need allow_http for non-TLS
+    if config
+        .endpoint
+        .as_ref()
+        .is_some_and(|e| e.starts_with("http://"))
+    {
+        builder = builder.with_allow_http(true);
+    }
+
+    builder
+        .build()
+        .map(|store| Arc::new(store) as Arc<dyn ObjectStore>)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to build S3 client: {e}")))
 }
 
-/// Synchronize litestream config file with the database config.
-/// - If an enabled config exists: writes litestream.yml and (re)starts litestream replicate.
-/// - If no enabled config: stops litestream and removes litestream.yml.
-pub async fn sync_litestream(
-    pool: &SqlitePool,
-    db_path: &str,
-    config_dir: &str,
-    litestream_child: &Arc<Mutex<Option<tokio::process::Child>>>,
-) -> Result<(), AppError> {
-    // Find any enabled config — single-user app, so user_id doesn't matter
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT user_id FROM backup_config WHERE enabled = 1 LIMIT 1")
-            .fetch_optional(pool)
-            .await?;
-
-    let config_path = format!("{config_dir}/litestream.yml");
-
-    match row {
-        Some((user_id_str,)) => {
-            let uid = Uuid::parse_str(&user_id_str).map_err(|e| AppError::Internal(e.into()))?;
-            let config = get_config(pool, uid)
-                .await?
-                .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Config disappeared")))?;
-
-            // Write litestream.yml
-            let yaml = generate_litestream_yaml(db_path, &config);
-            tracing::info!("Writing litestream config to {}", config_path);
-            tracing::debug!("Litestream config:\n{}", yaml);
-            std::fs::write(&config_path, &yaml).map_err(|e| AppError::Internal(e.into()))?;
-
-            // Try to start litestream replicate as a background process
-            start_litestream(&config_path, litestream_child).await;
+/// Build the object store path prefix for this DB instance.
+/// Format: {config.path}/{db_instance_id}/
+/// This isolates each DB instance's snapshots from previous ones.
+fn snapshot_prefix(config: &BackupConfig) -> String {
+    match &config.db_instance_id {
+        Some(instance_id) => {
+            let base = config.path.trim_end_matches('/');
+            if base.is_empty() {
+                format!("{}/", instance_id)
+            } else {
+                format!("{}/{}/", base, instance_id)
+            }
         }
         None => {
-            tracing::info!("No enabled backup config — stopping litestream and removing config");
-            stop_litestream(litestream_child).await;
-            if Path::new(&config_path).exists() {
-                tracing::info!("Removing {}", config_path);
-                let _ = std::fs::remove_file(&config_path);
+            let base = config.path.trim_end_matches('/');
+            if base.is_empty() {
+                "/".to_string()
+            } else {
+                format!("{}/", base)
             }
         }
     }
-
-    Ok(())
 }
 
-/// Start litestream replicate as a background process.
-/// If litestream is not installed, logs a warning instead of failing.
-/// The child process is stored in `litestream_child` so it can be killed on shutdown.
-pub async fn start_litestream(
-    config_path: &str,
-    litestream_child: &std::sync::Arc<Mutex<Option<tokio::process::Child>>>,
-) {
-    // Kill any existing litestream process we spawned first
-    stop_litestream(litestream_child).await;
-
-    match tokio::process::Command::new("litestream")
-        .arg("replicate")
-        .arg("-config")
-        .arg(config_path)
-        .spawn()
-    {
-        Ok(child) => {
-            tracing::info!("Litestream process started (PID {:?})", child.id());
-            let mut guard = litestream_child.lock().await;
-            *guard = Some(child);
-        }
-        Err(e) => {
-            tracing::warn!(
-                "Could not start litestream: {e}. \
-                 Install litestream or use the Docker sidecar for automatic backups."
-            );
-        }
-    }
-}
-
-/// Stop the litestream child process we spawned.
-pub async fn stop_litestream(
-    litestream_child: &std::sync::Arc<Mutex<Option<tokio::process::Child>>>,
-) {
-    let mut guard = litestream_child.lock().await;
-    if let Some(mut child) = guard.take() {
-        match child.kill().await {
-            Ok(()) => tracing::info!("Stopped litestream process (PID {:?})", child.id()),
-            Err(e) => tracing::warn!("Failed to stop litestream process: {e}"),
-        }
-        // Wait so the process is reaped; ignore errors (already dead)
-        let _ = child.wait().await;
-    }
-}
-
-/// A restore point parsed from `litestream ltx` output.
+/// A snapshot listed from the remote bucket.
 #[derive(Debug, Clone)]
-pub struct RestorePoint {
+pub struct Snapshot {
+    /// The object key in the bucket (e.g., "financials-backups/019f.../2026-07-12T18:30:00.db")
+    pub key: String,
+    /// ISO 8601 timestamp extracted from the filename.
     pub timestamp: String,
+    /// File size in bytes.
     pub size: u64,
-    pub level: u8,
+    /// The db_instance_id this snapshot belongs to (extracted from the path).
+    pub instance_id: Option<String>,
 }
 
-/// List available restore points by querying litestream.
-/// Returns snapshots from `litestream ltx -level all`, parsed into (timestamp, size, level).
-pub async fn list_restore_points(
-    db_path: &str,
-    config_dir: &str,
-) -> Result<Vec<RestorePoint>, AppError> {
-    let config_path = format!("{config_dir}/litestream.yml");
-    let output = tokio::process::Command::new("litestream")
-        .args(["ltx", "-config", &config_path, "-level", "all", db_path])
-        .output()
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to run litestream ltx: {e}")))?;
+/// List all available snapshots from the remote bucket, across all DB instances.
+/// This is used for the restore page so you can recover even when the DB is fresh.
+pub async fn list_all_snapshots(config: &BackupConfig) -> Result<Vec<Snapshot>, AppError> {
+    let store = build_object_store(config)?;
+    // List under the path prefix, not the instance-specific prefix,
+    // so we see snapshots from all DB instances.
+    let base = config.path.trim_end_matches('/');
+    let prefix_path = if base.is_empty() {
+        ObjectPath::from("/")
+    } else {
+        ObjectPath::from(base)
+    };
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AppError::Internal(anyhow::anyhow!(
-            "litestream ltx failed: {stderr}"
-        )));
-    }
+    let mut result = store.list(Some(&prefix_path));
+    let mut snapshots = Vec::new();
+    while let Some(item) = result.next().await {
+        let meta =
+            item.map_err(|e| AppError::Internal(anyhow::anyhow!("error listing snapshots: {e}")))?;
+        let key = meta.location.to_string();
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut points = Vec::new();
-
-    // Parse tabular output:
-    // level  min_txid          max_txid          size   created
-    // 0      0000000000000006  0000000000000006  75215  2026-07-11T01:27:52Z
-    for line in stdout.lines().skip(1) {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 5 {
+        // Only include .db files (our snapshot format)
+        if !key.ends_with(".db") {
             continue;
         }
-        let level: u8 = match parts[0].parse() {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
-        let size: u64 = match parts[3].parse() {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        let timestamp = parts[4].to_string();
-        points.push(RestorePoint {
+
+        // Extract instance_id from path: {path}/{instance_id}/{timestamp}.db
+        let instance_id = extract_instance_id(&key, base);
+
+        // Extract timestamp from filename: 2026-07-12T18:30:00Z.db
+        let filename = key.rsplit('/').next().unwrap_or(&key);
+        let timestamp = filename.trim_end_matches(".db").to_string();
+
+        snapshots.push(Snapshot {
+            key,
             timestamp,
-            size,
-            level,
+            size: meta.size as u64,
+            instance_id,
         });
     }
 
-    // Only show fully-compacted snapshots (level 9) — these are self-contained
-    // restore points. Lower levels are incremental WAL segments that litestream
-    // uses internally; the user shouldn't need to pick them.
-    let mut restore_points: Vec<RestorePoint> =
-        points.into_iter().filter(|p| p.level == 9).collect();
-
     // Sort by timestamp descending (newest first)
-    restore_points.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    Ok(restore_points)
+    snapshots.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(snapshots)
 }
 
-/// Restore the database from a litestream backup.
+/// Extract the db_instance_id from an object key.
+/// Key format: {path}/{instance_id}/{timestamp}.db or {timestamp}.db (no instance_id)
+fn extract_instance_id(key: &str, base_path: &str) -> Option<String> {
+    // Remove the base path prefix and the filename
+    let stripped = if base_path.is_empty() {
+        key
+    } else {
+        key.strip_prefix(&format!("{}/", base_path)).unwrap_or(key)
+    };
+    // Remaining: "{instance_id}/{timestamp}.db" or "{timestamp}.db"
+    let parts: Vec<&str> = stripped.split('/').collect();
+    if parts.len() >= 2 {
+        // First part is the instance_id
+        Some(parts[0].to_string())
+    } else {
+        None
+    }
+}
+
+/// List snapshots for the current DB instance only.
+/// Used for pruning (we only prune our own snapshots).
+pub async fn list_snapshots(config: &BackupConfig) -> Result<Vec<Snapshot>, AppError> {
+    let store = build_object_store(config)?;
+    let prefix = snapshot_prefix(config);
+    let prefix_path = ObjectPath::from(prefix.trim_end_matches('/'));
+
+    let mut result = store.list(Some(&prefix_path));
+    let mut snapshots = Vec::new();
+    while let Some(item) = result.next().await {
+        let meta =
+            item.map_err(|e| AppError::Internal(anyhow::anyhow!("error listing snapshots: {e}")))?;
+        let key = meta.location.to_string();
+
+        // Only include .db files (our snapshot format)
+        if !key.ends_with(".db") {
+            continue;
+        }
+
+        // Extract timestamp from filename: {prefix}2026-07-12T18:30:00Z.db
+        let filename = key.rsplit('/').next().unwrap_or(&key);
+        let timestamp = filename.trim_end_matches(".db").to_string();
+
+        snapshots.push(Snapshot {
+            key,
+            timestamp,
+            size: meta.size as u64,
+            instance_id: config.db_instance_id.clone(),
+        });
+    }
+
+    // Sort by timestamp descending (newest first)
+    snapshots.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(snapshots)
+}
+
+/// Create a snapshot: `sqlite3 .backup` to a temp file, then upload to the bucket.
+pub async fn create_snapshot(
+    pool: &SqlitePool,
+    db_path: &str,
+    config: &BackupConfig,
+) -> Result<String, AppError> {
+    // Create a local backup using sqlite3 .backup command
+    let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let snapshot_filename = format!("{timestamp}.db");
+    let snapshot_dir = format!("{db_path}.snapshots");
+    let snapshot_path = format!("{snapshot_dir}/{snapshot_filename}");
+
+    // Create the snapshots directory if needed
+    std::fs::create_dir_all(&snapshot_dir)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to create snapshots dir: {e}")))?;
+
+    // Use SQL backup to create a consistent snapshot
+    // This copies the entire database to a new file without locking
+    let backup_path = snapshot_path.clone();
+    sqlx::query("VACUUM INTO ?1")
+        .bind(&backup_path)
+        .execute(pool)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("sqlite VACUUM INTO failed: {e}")))?;
+
+    // Upload to the remote bucket
+    let store = build_object_store(config)?;
+    let prefix = snapshot_prefix(config);
+    let object_key = format!("{}{}", prefix, snapshot_filename);
+    let object_path = ObjectPath::from(object_key.as_str());
+
+    let data = std::fs::read(&snapshot_path)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to read snapshot file: {e}")))?;
+
+    store
+        .put(&object_path, data.into())
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to upload snapshot: {e}")))?;
+
+    // Clean up local snapshot file
+    let _ = std::fs::remove_file(&snapshot_path);
+
+    // Prune old snapshots beyond the retention limit
+    let existing = list_snapshots(config).await.unwrap_or_default();
+    prune_snapshots(config, &existing).await?;
+
+    tracing::info!("Snapshot uploaded: {object_key}");
+    Ok(object_key)
+}
+
+/// Prune old snapshots beyond the configured retention limit.
+/// Keeps the newest `max_snapshots` and deletes the rest.
+pub async fn prune_snapshots(
+    config: &BackupConfig,
+    existing_snapshots: &[Snapshot],
+) -> Result<usize, AppError> {
+    let max = config.max_snapshots.max(1) as usize;
+    if existing_snapshots.len() <= max {
+        return Ok(0);
+    }
+
+    let store = build_object_store(config)?;
+    let to_delete = &existing_snapshots[max..];
+    let mut deleted = 0;
+
+    for snapshot in to_delete {
+        let path = ObjectPath::from(snapshot.key.as_str());
+        match store.delete(&path).await {
+            Ok(()) => {
+                tracing::info!("Pruned snapshot: {}", snapshot.key);
+                deleted += 1;
+            }
+            Err(e) => {
+                tracing::warn!("Failed to prune snapshot {}: {e}", snapshot.key);
+            }
+        }
+    }
+
+    Ok(deleted)
+}
+
+/// Restore the database from a remote snapshot.
 ///
-/// This stops litestream, swaps the database file, and reconnects the pool
+/// Downloads the snapshot, swaps the database file, and reconnects the pool
 /// in-place — no process restart needed.
-///
-/// If `timestamp` is provided, restores to that point in time (ISO 8601).
-/// If None, restores the latest snapshot.
-pub async fn restore_from_backup(
+pub async fn restore_from_snapshot(
     db: &Arc<RwLock<SqlitePool>>,
     db_path: &str,
-    config_dir: &str,
-    litestream_child: &Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
-    timestamp: Option<&str>,
+    config: &BackupConfig,
+    snapshot_key: &str,
 ) -> Result<(), AppError> {
-    // Find the backup config
-    let pool = db.read().await;
-    let row: Option<(String,)> = sqlx::query_as("SELECT user_id FROM backup_config LIMIT 1")
-        .fetch_optional(&*pool)
-        .await?;
-    let user_id_str = row
-        .ok_or_else(|| AppError::BadRequest("No backup configuration found".into()))?
-        .0;
-    let uid = Uuid::parse_str(&user_id_str).map_err(|e| AppError::Internal(e.into()))?;
-    let config = get_config(&pool, uid)
-        .await?
-        .ok_or_else(|| AppError::BadRequest("No backup configuration found".into()))?;
-    drop(pool); // Release read lock before long operations
+    let store = build_object_store(config)?;
+    let object_path = ObjectPath::from(snapshot_key);
 
-    // Stop litestream before restoring
-    tracing::info!("Stopping litestream before restore");
-    stop_litestream(litestream_child).await;
+    // Download the snapshot
+    let result = store
+        .get(&object_path)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to download snapshot: {e}")))?;
 
-    // Write litestream config
-    let yaml = generate_litestream_yaml(db_path, &config);
-    let config_path = format!("{config_dir}/litestream.yml");
-    std::fs::write(&config_path, &yaml).map_err(|e| AppError::Internal(e.into()))?;
+    let bytes = result
+        .bytes()
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to read snapshot data: {e}")))?;
 
-    // Restore to a temp file first, then swap
-    let db_path_buf = Path::new(db_path);
+    let db_path_buf = std::path::Path::new(db_path);
     let db_dir = db_path_buf
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."))
+        .unwrap_or(std::path::Path::new("."))
         .to_string_lossy()
         .to_string();
     let restore_path = format!("{db_dir}/data.db.restore");
 
-    // Build the litestream restore command
-    let mut args = vec![
-        "restore".to_string(),
-        "-config".to_string(),
-        config_path.clone(),
-        "-o".to_string(),
-        restore_path.clone(),
-    ];
-    if let Some(ts) = timestamp {
-        tracing::info!("Restoring database from backup to {restore_path} (timestamp: {ts})");
-        args.push("-timestamp".to_string());
-        args.push(ts.to_string());
-    } else {
-        tracing::info!("Restoring database from backup to {restore_path} (latest)");
-    }
-    args.push(db_path.to_string());
+    // Write downloaded data to temp file
+    std::fs::write(&restore_path, &bytes)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to write restore file: {e}")))?;
 
-    let output = tokio::process::Command::new("litestream")
-        .args(&args)
-        .output()
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-
-    if !output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let status = output.status;
-        // Clean up partial restore file
-        let _ = std::fs::remove_file(&restore_path);
-        return Err(AppError::Internal(anyhow::anyhow!(
-            "litestream restore failed (exit {status}): stdout={stdout} stderr={stderr}"
-        )));
-    }
-
-    tracing::info!("Restore downloaded successfully, replacing database file");
+    tracing::info!("Snapshot downloaded, replacing database file");
 
     // Close all connections in the pool
     let mut pool_guard = db.write().await;
@@ -513,8 +365,10 @@ pub async fn restore_from_backup(
     // Remove WAL/SHM from old database
     let wal_path = format!("{db_path}-wal");
     let shm_path = format!("{db_path}-shm");
+    let lstream_dir = format!("{db_path}-litestream");
     let _ = std::fs::remove_file(&wal_path);
     let _ = std::fs::remove_file(&shm_path);
+    let _ = std::fs::remove_dir_all(&lstream_dir);
 
     // Swap the database file
     std::fs::rename(&restore_path, db_path).map_err(|e| {
@@ -538,12 +392,143 @@ pub async fn restore_from_backup(
 
     tracing::info!("Database restored and pool reconnected");
 
-    // Restart litestream if it was enabled
+    // If enabled, create a new snapshot of the restored DB
+    // (this also verifies the restored DB is healthy)
     if config.enabled {
-        tracing::info!("Restarting litestream (was enabled)");
-        start_litestream(&config_path, litestream_child).await;
+        let pool = db.read().await.clone();
+        if let Err(e) = create_snapshot(&pool, db_path, config).await {
+            tracing::warn!("Post-restore snapshot failed (non-fatal): {e:?}");
+        }
     }
 
+    Ok(())
+}
+
+pub async fn get_config(pool: &SqlitePool) -> Result<Option<BackupConfig>, AppError> {
+    let row = sqlx::query_as::<_, (String, String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool, Option<String>, i64, i64)>(
+        "SELECT id, provider, bucket, path, region, endpoint, access_key_id, secret_access_key, b2_key_id, b2_application_key, b2_endpoint, enabled, db_instance_id, interval_minutes, max_snapshots FROM backup_config LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    match row {
+        Some((
+            id_str,
+            provider,
+            bucket,
+            path,
+            region,
+            endpoint,
+            access_key_id,
+            secret_access_key,
+            b2_key_id,
+            b2_application_key,
+            b2_endpoint,
+            enabled,
+            db_instance_id,
+            interval_minutes,
+            max_snapshots,
+        )) => {
+            let id = Uuid::parse_str(&id_str)?;
+            Ok(Some(BackupConfig {
+                id,
+                provider,
+                bucket,
+                path,
+                region,
+                endpoint,
+                access_key_id,
+                secret_access_key,
+                b2_key_id,
+                b2_application_key,
+                b2_endpoint,
+                enabled,
+                db_instance_id,
+                interval_minutes,
+                max_snapshots,
+            }))
+        }
+        None => Ok(None),
+    }
+}
+
+pub async fn save_config(pool: &SqlitePool, config: &BackupConfig) -> Result<(), AppError> {
+    let existing = sqlx::query("SELECT id FROM backup_config LIMIT 1")
+        .fetch_optional(pool)
+        .await?;
+
+    if existing.is_some() {
+        // Updating existing config — preserve the db_instance_id from the
+        // config struct (which came from the DB via get_config). If somehow
+        // missing, generate a new one, but normally it should always be set.
+        let db_instance_id = match &config.db_instance_id {
+            Some(id) => id.clone(),
+            None => Uuid::now_v7().to_string(),
+        };
+
+        sqlx::query(
+            "UPDATE backup_config SET provider = ?, bucket = ?, path = ?, region = ?, endpoint = ?, \
+             access_key_id = ?, secret_access_key = ?, b2_key_id = ?, b2_application_key = ?, \
+             b2_endpoint = ?, enabled = ?, db_instance_id = ?, interval_minutes = ?, max_snapshots = ?, updated_at = CURRENT_TIMESTAMP",
+        )
+        .bind(&config.provider)
+        .bind(&config.bucket)
+        .bind(&config.path)
+        .bind(&config.region)
+        .bind(&config.endpoint)
+        .bind(&config.access_key_id)
+        .bind(&config.secret_access_key)
+        .bind(&config.b2_key_id)
+        .bind(&config.b2_application_key)
+        .bind(&config.b2_endpoint)
+        .bind(config.enabled)
+        .bind(&db_instance_id)
+        .bind(config.interval_minutes)
+        .bind(config.max_snapshots)
+        .execute(pool)
+        .await?;
+    } else {
+        // New config — always generate a fresh db_instance_id
+        let id = Uuid::now_v7();
+        let db_instance_id = Uuid::now_v7().to_string();
+
+        sqlx::query(
+            "INSERT INTO backup_config (id, provider, bucket, path, region, endpoint, \
+             access_key_id, secret_access_key, b2_key_id, b2_application_key, b2_endpoint, enabled, db_instance_id, interval_minutes, max_snapshots) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(id.to_string())
+        .bind(&config.provider)
+        .bind(&config.bucket)
+        .bind(&config.path)
+        .bind(&config.region)
+        .bind(&config.endpoint)
+        .bind(&config.access_key_id)
+        .bind(&config.secret_access_key)
+        .bind(&config.b2_key_id)
+        .bind(&config.b2_application_key)
+        .bind(&config.b2_endpoint)
+        .bind(config.enabled)
+        .bind(&db_instance_id)
+        .bind(config.interval_minutes)
+        .bind(config.max_snapshots)
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
+pub async fn set_enabled(pool: &SqlitePool, enabled: bool) -> Result<(), AppError> {
+    let result =
+        sqlx::query("UPDATE backup_config SET enabled = ?, updated_at = CURRENT_TIMESTAMP")
+            .bind(enabled)
+            .execute(pool)
+            .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::BadRequest("No backup config found".into()));
+    }
     Ok(())
 }
 
@@ -554,7 +539,6 @@ mod tests {
     fn make_s3_config() -> BackupConfig {
         BackupConfig {
             id: Uuid::nil(),
-            user_id: Uuid::nil(),
             provider: "s3".to_string(),
             bucket: "my-bucket".to_string(),
             path: "db-backups".to_string(),
@@ -566,13 +550,15 @@ mod tests {
             b2_application_key: None,
             b2_endpoint: None,
             enabled: true,
+            db_instance_id: Some("019f5564-a32d-7573-966b-b9bd9afe0fc5".to_string()),
+            interval_minutes: 60,
+            max_snapshots: 10,
         }
     }
 
     fn make_b2_config() -> BackupConfig {
         BackupConfig {
             id: Uuid::nil(),
-            user_id: Uuid::nil(),
             provider: "b2".to_string(),
             bucket: "my-b2-bucket".to_string(),
             path: "db-backups".to_string(),
@@ -582,82 +568,94 @@ mod tests {
             secret_access_key: None,
             b2_key_id: Some("b2-key-id".to_string()),
             b2_application_key: Some("b2-app-key".to_string()),
-            b2_endpoint: None, // will default to s3.us-west-004.backblazeb2.com
+            b2_endpoint: None,
             enabled: true,
+            db_instance_id: Some("019f5564-a32d-7573-966b-b9bd9afe0fc5".to_string()),
+            interval_minutes: 60,
+            max_snapshots: 10,
         }
     }
 
     #[test]
-    fn litestream_yaml_s3_basic() {
+    fn snapshot_prefix_with_instance_id() {
         let config = make_s3_config();
-        let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("path: /data/financials.db"));
-        assert!(yaml.contains("type: s3"));
-        assert!(yaml.contains("bucket: my-bucket"));
-        assert!(yaml.contains("path: db-backups"));
-        assert!(yaml.contains("region: us-east-1"));
-        assert!(yaml.contains("access-key-id: AKIA123"));
-        assert!(yaml.contains("secret-access-key: secret456"));
+        let prefix = snapshot_prefix(&config);
+        assert_eq!(prefix, "db-backups/019f5564-a32d-7573-966b-b9bd9afe0fc5/");
     }
 
     #[test]
-    fn litestream_yaml_s3_no_path() {
+    fn snapshot_prefix_without_instance_id() {
+        let mut config = make_s3_config();
+        config.db_instance_id = None;
+        let prefix = snapshot_prefix(&config);
+        assert_eq!(prefix, "db-backups/");
+    }
+
+    #[test]
+    fn snapshot_prefix_empty_path() {
         let mut config = make_s3_config();
         config.path = String::new();
-        let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("bucket: my-bucket"));
-        assert!(!yaml.contains("        path:"));
+        config.db_instance_id = Some("abc-123".to_string());
+        let prefix = snapshot_prefix(&config);
+        assert_eq!(prefix, "abc-123/");
     }
 
     #[test]
-    fn litestream_yaml_s3_custom_endpoint() {
+    fn snapshot_prefix_empty_path_no_instance_id() {
+        let mut config = make_s3_config();
+        config.path = String::new();
+        config.db_instance_id = None;
+        let prefix = snapshot_prefix(&config);
+        assert_eq!(prefix, "/");
+    }
+
+    #[test]
+    fn build_object_store_s3() {
+        let config = make_s3_config();
+        let result = build_object_store(&config);
+        assert!(result.is_ok(), "Should build S3 client: {:?}", result.err());
+    }
+
+    #[test]
+    fn build_object_store_b2() {
+        let config = make_b2_config();
+        let result = build_object_store(&config);
+        assert!(result.is_ok(), "Should build B2 client: {:?}", result.err());
+    }
+
+    #[test]
+    fn build_object_store_custom_endpoint() {
         let mut config = make_s3_config();
         config.endpoint = Some("https://minio.example.com".to_string());
-        let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("endpoint: https://minio.example.com"));
-        assert!(yaml.contains("region: us-east-1"));
+        let result = build_object_store(&config);
+        assert!(result.is_ok());
     }
 
     #[test]
-    fn litestream_yaml_b2_uses_s3_protocol() {
-        let config = make_b2_config();
-        let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        // B2 uses S3-compatible expanded format
-        assert!(yaml.contains("type: s3"));
-        assert!(yaml.contains("bucket: my-b2-bucket"));
-        assert!(yaml.contains("path: db-backups"));
-        assert!(yaml.contains("endpoint: https://s3.us-west-004.backblazeb2.com"));
-        assert!(yaml.contains("access-key-id: b2-key-id"));
-        assert!(yaml.contains("secret-access-key: b2-app-key"));
-        // Must NOT use b2:// URLs — litestream doesn't support them
-        assert!(!yaml.contains("b2://"));
-    }
-
-    #[test]
-    fn litestream_yaml_b2_custom_endpoint() {
-        let mut config = make_b2_config();
-        config.b2_endpoint = Some("s3.eu-central-003.backblazeb2.com".to_string());
-        let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("endpoint: https://s3.eu-central-003.backblazeb2.com"));
-    }
-
-    #[test]
-    fn litestream_yaml_b2_no_path() {
-        let mut config = make_b2_config();
-        config.path = String::new();
-        let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("bucket: my-b2-bucket"));
-        // No path prefix should be emitted when path is empty
-        assert!(!yaml.contains("        path:"));
-    }
-
-    #[test]
-    fn litestream_yaml_missing_credentials_default_to_empty() {
-        let mut config = make_s3_config();
-        config.access_key_id = None;
-        config.secret_access_key = None;
-        let yaml = generate_litestream_yaml("/data/financials.db", &config);
-        assert!(yaml.contains("access-key-id: "));
-        assert!(yaml.contains("secret-access-key: "));
+    fn extract_instance_id_from_key() {
+        // Standard path: financials-backups/{instance_id}/{timestamp}.db
+        assert_eq!(
+            extract_instance_id(
+                "financials-backups/abc-123/2026-07-12T18:30:00Z.db",
+                "financials-backups"
+            ),
+            Some("abc-123".to_string())
+        );
+        // No base path
+        assert_eq!(
+            extract_instance_id("abc-123/2026-07-12T18:30:00Z.db", ""),
+            Some("abc-123".to_string())
+        );
+        // No instance ID (old format or flat path)
+        assert_eq!(extract_instance_id("2026-07-12T18:30:00Z.db", ""), None);
+        // Base path doesn't match — strip_prefix falls back to full key
+        // so the first segment is "other-path"
+        assert_eq!(
+            extract_instance_id(
+                "other-path/abc-123/2026-07-12T18:30:00Z.db",
+                "financials-backups"
+            ),
+            Some("other-path".to_string())
+        );
     }
 }

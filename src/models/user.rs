@@ -59,3 +59,36 @@ pub async fn get_username_by_id(pool: &SqlitePool, user_id: Uuid) -> Result<Stri
     let username: String = row.get("username");
     Ok(username)
 }
+
+/// Seed the admin user at startup.
+/// If the user doesn't exist, creates it. If it does, updates the password hash.
+/// Returns the user_id.
+pub async fn seed_admin(
+    pool: &SqlitePool,
+    username: &str,
+    password_hash: &str,
+) -> Result<Uuid, AppError> {
+    // Check if admin user exists
+    let existing = sqlx::query("SELECT user_id FROM users WHERE username = ?")
+        .bind(username)
+        .fetch_optional(pool)
+        .await?;
+
+    match existing {
+        Some(row) => {
+            let id_str: String = row.get("user_id");
+            let user_id = Uuid::parse_str(&id_str).map_err(|e| AppError::Internal(e.into()))?;
+            // Update password hash in case it changed
+            sqlx::query("UPDATE users SET password_hash = ? WHERE user_id = ?")
+                .bind(password_hash)
+                .bind(id_str)
+                .execute(pool)
+                .await?;
+            Ok(user_id)
+        }
+        None => {
+            let user_id = create_user(pool, username, password_hash).await?;
+            Ok(user_id)
+        }
+    }
+}

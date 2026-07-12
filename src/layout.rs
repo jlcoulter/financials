@@ -1,6 +1,10 @@
 use crate::cookies::LoggedInUser;
 
-pub fn layout(title: &str, content: maud::Markup, username: Option<&LoggedInUser>) -> maud::Markup {
+pub fn layout(
+    title: &str,
+    content: maud::Markup,
+    logged_in: Option<&LoggedInUser>,
+) -> maud::Markup {
     maud::html! {
         html {
             head {
@@ -13,17 +17,15 @@ pub fn layout(title: &str, content: maud::Markup, username: Option<&LoggedInUser
             }
             body {
                 header {
-                    @if let Some(_name) = username {
+                    @if logged_in.is_some() {
                         a href="/dashboard" class="header-link" { "Dashboard" }
-                        span { "Hello!"  }
-                        form action = "/logout"
-                        method = "post" {
-                            button type = "submit" class="btn btn-ghost" {"Logout"}
+                        span { "Hello!" }
+                        form action="/logout" method="post" {
+                            button type="submit" class="btn btn-ghost" { "Logout" }
                         }
                     } @else {
-                        a href = "/login" class="btn" { "Login" }
-                        " "
-                        a href = "/signup" class="btn" {"Sign up"}
+                        a href="/login" class="btn" { "Login" }
+                        a href="/backup" class="btn btn-ghost" { "Restore" }
                     }
                 }
                 (content)
