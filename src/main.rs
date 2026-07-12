@@ -1,5 +1,6 @@
 use rust_web::AppState;
 use rust_web::auth;
+use rust_web::models::backup::LitestreamGuard;
 use rust_web::pages;
 use std::str::FromStr;
 
@@ -9,6 +10,32 @@ use sqlx::sqlite::SqliteConnectOptions;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tower_http::services::ServeDir;
+
+/// Listen for both SIGINT (ctrl-c) and SIGTERM (Docker stop / kill) so the
+/// graceful-shutdown handler runs in all normal termination scenarios.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to listen for ctrl+c");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to listen for SIGTERM")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -29,7 +56,10 @@ async fn main() -> anyhow::Result<()> {
     sqlx::migrate!().run(&db).await?;
 
     let key = axum_extra::extract::cookie::Key::generate();
-    let litestream_child = std::sync::Arc::new(Mutex::new(None));
+    let litestream_child = Arc::new(Mutex::new(None));
+    // RAII guard: even if we exit via panic or error, the litestream child
+    // process will be killed when this is dropped.
+    let _litestream_guard = LitestreamGuard::new(litestream_child.clone());
     let state = AppState {
         db: Arc::new(RwLock::new(db.clone())),
         key,
@@ -54,9 +84,7 @@ async fn main() -> anyhow::Result<()> {
     let litestream_for_shutdown = litestream_child.clone();
     axum::serve(listener, app(state, static_dir))
         .with_graceful_shutdown(async move {
-            tokio::signal::ctrl_c()
-                .await
-                .expect("failed to listen for ctrl+c");
+            shutdown_signal().await;
             tracing::info!("Shutting down...");
             // Kill litestream on shutdown so it doesn't outlive the app
             rust_web::models::backup::stop_litestream(&litestream_for_shutdown).await;
