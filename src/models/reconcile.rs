@@ -137,17 +137,19 @@ pub async fn list_outgoing(
     .await?;
 
     rows.into_iter()
-        .map(|(id_str, sid_str, date_str, amount, vendor, matched, ignored)| {
-            Ok(OutgoingTxn {
-                txn_id: Uuid::parse_str(&id_str)?,
-                session_id: Uuid::parse_str(&sid_str)?,
-                date: NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")?,
-                amount,
-                vendor,
-                matched,
-                ignored,
-            })
-        })
+        .map(
+            |(id_str, sid_str, date_str, amount, vendor, matched, ignored)| {
+                Ok(OutgoingTxn {
+                    txn_id: Uuid::parse_str(&id_str)?,
+                    session_id: Uuid::parse_str(&sid_str)?,
+                    date: NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")?,
+                    amount,
+                    vendor,
+                    matched,
+                    ignored,
+                })
+            },
+        )
         .collect()
 }
 
@@ -214,17 +216,19 @@ pub async fn list_reconciled(
     .await?;
 
     rows.into_iter()
-        .map(|(id_str, sid_str, date_str, amount, vendor, matched, ignored)| {
-            Ok(ReconciledTxn {
-                txn_id: Uuid::parse_str(&id_str)?,
-                session_id: Uuid::parse_str(&sid_str)?,
-                date: NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")?,
-                amount,
-                vendor,
-                matched,
-                ignored,
-            })
-        })
+        .map(
+            |(id_str, sid_str, date_str, amount, vendor, matched, ignored)| {
+                Ok(ReconciledTxn {
+                    txn_id: Uuid::parse_str(&id_str)?,
+                    session_id: Uuid::parse_str(&sid_str)?,
+                    date: NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")?,
+                    amount,
+                    vendor,
+                    matched,
+                    ignored,
+                })
+            },
+        )
         .collect()
 }
 
