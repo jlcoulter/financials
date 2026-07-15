@@ -376,6 +376,15 @@ pub async fn add_balance(
     let log_date = NaiveDate::parse_from_str(log_date_str, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
     let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
+    let existing_logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
+    let date_exists = existing_logs.iter().any(|l| l.log_date == log_date);
+    if date_exists {
+        return Ok(axum::response::Redirect::to(&format!(
+            "/portfolio/{}?flash=An+entry+for+this+date+already+exists&flash_type=error",
+            portfolio_id
+        ))
+        .into_response());
+    }
     for item in &items {
         let key = format!("balance_{}", item.item_id);
         if let Some(value) = form.get(&key)
