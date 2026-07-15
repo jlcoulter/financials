@@ -940,6 +940,19 @@ th.th--debt {
 }
 
 
+.reconcile-section-heading {
+    margin-top: 2rem;
+    margin-bottom: 0.5rem;
+    font-size: 1.1rem;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.25rem;
+}
+
+.reconcile-grid--matched {
+    opacity: 0.85;
+}
+
 /* Flash messages */
 .flash-success {
     background: #2e7d32;

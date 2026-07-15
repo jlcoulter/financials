@@ -1320,6 +1320,7 @@ pub async fn reconcile_detail(
     let unmatched_reconciled: Vec<&ReconciledTxn> =
         reconciled.iter().filter(|r| !r.matched).collect();
     let unmatched_max = unmatched_outgoing.len().max(unmatched_reconciled.len());
+    let matched_outgoing: Vec<&OutgoingTxn> = outgoing.iter().filter(|o| o.matched).collect();
 
     Ok(layout(
         &format!("Reconcile — {}", name),
@@ -1409,9 +1410,53 @@ pub async fn reconcile_detail(
                 div class="reconcile-grid-header" { "Outgoing" }
                 div class="reconcile-grid-header" { "Reconciled" }
 
-                // ── Matched pairs: outgoing on left, its reconciled stack on right ──
-                @for o in &outgoing {
-                    @if o.matched {
+                // ── Unmatched pairs: outgoing left, reconciled right ──
+                @for i in 0..unmatched_max {
+                    @if let Some(o) = unmatched_outgoing.get(i) {
+                        div class="reconcile-txn reconcile-txn--unmatched" {
+                            div class="txn-row" {
+                                span class="txn-date" { (utils::format_date(o.date)) }
+                                @if !o.vendor.is_empty() {
+                                    span class="txn-vendor" { (o.vendor) }
+                                }
+                                span class="txn-amount" { (utils::format_cents(o.amount)) }
+                                button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match" }
+                                form method="post" action=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form" {
+                                    button type="submit" class="btn-ignore" { "Ignore" }
+                                }
+                            }
+                        }
+                    } @else {
+                        div class="reconcile-grid-spacer" {}
+                    }
+                    @if let Some(r) = unmatched_reconciled.get(i) {
+                        div class="reconcile-txn reconcile-txn--unmatched" {
+                            div class="txn-row" {
+                                input type="checkbox" name="reconciled_ids" value=(r.txn_id) form="reconcile-match-form" class="txn-card-checkbox" {}
+                                span class="txn-date" { (utils::format_date(r.date)) }
+                                @if !r.vendor.is_empty() {
+                                    span class="txn-vendor" { (r.vendor) }
+                                }
+                                span class="txn-amount" { (utils::format_cents(r.amount)) }
+                                form method="post" action=(format!("/reconcile/{}/ignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form" {
+                                    button type="submit" class="btn-ignore" { "Ignore" }
+                                }
+                            }
+                        }
+                    } @else {
+                        div class="reconcile-grid-spacer" {}
+                    }
+                }
+            }
+
+            // ── Matched section ──
+            @if !matched_outgoing.is_empty() {
+                h3 class="reconcile-section-heading" { "Matched" }
+                div class="reconcile-grid reconcile-grid--matched" {
+                    div class="reconcile-grid-header" { "Outgoing" }
+                    div class="reconcile-grid-header" { "Reconciled" }
+
+                    @for o in &matched_outgoing {
                         @if let Some(linked_ids) = match_map.get(&o.txn_id) {
                             @let row_span = linked_ids.len().max(1);
                             div class="reconcile-txn reconcile-txn--matched" style=(format!("grid-row: span {}", row_span)) {
@@ -1463,44 +1508,6 @@ pub async fn reconcile_detail(
                                 }
                             }
                         }
-                    }
-                }
-
-                // ── Unmatched pairs: outgoing left, reconciled right ──
-                @for i in 0..unmatched_max {
-                    @if let Some(o) = unmatched_outgoing.get(i) {
-                        div class="reconcile-txn reconcile-txn--unmatched" {
-                            div class="txn-row" {
-                                span class="txn-date" { (utils::format_date(o.date)) }
-                                @if !o.vendor.is_empty() {
-                                    span class="txn-vendor" { (o.vendor) }
-                                }
-                                span class="txn-amount" { (utils::format_cents(o.amount)) }
-                                button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match" }
-                                form method="post" action=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form" {
-                                    button type="submit" class="btn-ignore" { "Ignore" }
-                                }
-                            }
-                        }
-                    } @else {
-                        div class="reconcile-grid-spacer" {}
-                    }
-                    @if let Some(r) = unmatched_reconciled.get(i) {
-                        div class="reconcile-txn reconcile-txn--unmatched" {
-                            div class="txn-row" {
-                                input type="checkbox" name="reconciled_ids" value=(r.txn_id) form="reconcile-match-form" class="txn-card-checkbox" {}
-                                span class="txn-date" { (utils::format_date(r.date)) }
-                                @if !r.vendor.is_empty() {
-                                    span class="txn-vendor" { (r.vendor) }
-                                }
-                                span class="txn-amount" { (utils::format_cents(r.amount)) }
-                                form method="post" action=(format!("/reconcile/{}/ignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form" {
-                                    button type="submit" class="btn-ignore" { "Ignore" }
-                                }
-                            }
-                        }
-                    } @else {
-                        div class="reconcile-grid-spacer" {}
                     }
                 }
             }
