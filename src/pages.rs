@@ -2,14 +2,17 @@ use crate::AppState;
 use crate::cookies::LoggedInUser;
 use crate::error::AppError;
 use crate::layout::layout;
+use crate::models::backup;
 use crate::models::csv_import;
 use crate::models::portfolio::{self, BalanceLog, WealthItem};
 use crate::models::reconcile::{self, OutgoingTxn, ReconciledTxn};
 use crate::models::user;
 use crate::utils;
-use axum::extract::{Path, State};
+use axum::extract::{Form, Path, Query, State};
 use axum::response::IntoResponse;
+use axum::response::Redirect;
 use chrono::NaiveDate;
+use serde::Deserialize;
 use uuid::Uuid;
 
 struct GridRow {
@@ -42,20 +45,8 @@ fn pivot_logs(items: &[WealthItem], logs: &[BalanceLog]) -> Vec<GridRow> {
         .collect()
 }
 
-pub async fn hello(
-    State(_state): State<AppState>,
-    user: Option<LoggedInUser>,
-) -> impl IntoResponse {
-    layout(
-        "Home",
-        maud::html! {
-        h1 {"Hello"}
-        div id="clock" hx-get="/time" hx-trigger="every 1s" {
-            "Loading..."
-        }
-                    },
-        user.as_ref(),
-    )
+pub async fn hello() -> impl IntoResponse {
+    axum::response::Redirect::to("/login")
 }
 
 #[derive(serde::Deserialize)]
@@ -77,7 +68,7 @@ pub async fn create_portfolio(
     if form.name.trim().is_empty() {
         return Err(AppError::BadRequest("Portfolio name is required".into()));
     }
-    portfolio::create_portfolio(state.db(), user.0, form.name.trim()).await?;
+    portfolio::create_portfolio(&state.db().await, user.0, form.name.trim()).await?;
     Ok(axum::response::Redirect::to("/portfolios"))
 }
 
@@ -87,8 +78,9 @@ pub async fn add_item(
     user: LoggedInUser,
     axum::Form(form): axum::Form<AddItemForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    portfolio::create_wealth_item(state.db(), portfolio_id, &form.name, &form.item_type).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
+    portfolio::create_wealth_item(&state.db().await, portfolio_id, &form.name, &form.item_type)
+        .await?;
     Ok(axum::response::Redirect::to(&format!(
         "/portfolio/{}",
         portfolio_id
@@ -106,13 +98,13 @@ pub async fn rename_portfolio(
     user: LoggedInUser,
     axum::Form(form): axum::Form<RenamePortfolioForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     if form.name.trim().is_empty() {
         return Err(AppError::BadRequest(
             "Portfolio name cannot be empty".into(),
         ));
     }
-    portfolio::rename_portfolio(state.db(), portfolio_id, form.name.trim()).await?;
+    portfolio::rename_portfolio(&state.db().await, portfolio_id, form.name.trim()).await?;
     Ok(axum::response::Redirect::to(&format!(
         "/portfolio/{}",
         portfolio_id
@@ -131,8 +123,14 @@ pub async fn move_item(
     user: LoggedInUser,
     axum::extract::Query(query): axum::extract::Query<MoveItemQuery>,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    portfolio::move_wealth_item(state.db(), portfolio_id, query.item_id, &query.direction).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
+    portfolio::move_wealth_item(
+        &state.db().await,
+        portfolio_id,
+        query.item_id,
+        &query.direction,
+    )
+    .await?;
     Ok(axum::response::Redirect::to(&format!(
         "/portfolio/{}",
         portfolio_id
@@ -143,7 +141,7 @@ pub async fn portfolios(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let portfolios = portfolio::list_portfolios(state.db(), user.0).await?;
+    let portfolios = portfolio::list_portfolios(&state.db().await, user.0).await?;
     Ok(layout(
         "Portfolios",
         maud::html! {
@@ -185,9 +183,9 @@ pub async fn portfolio(
     user: LoggedInUser,
     axum::extract::Query(query): axum::extract::Query<PortfolioQuery>,
 ) -> Result<maud::Markup, AppError> {
-    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let (_id, name) = portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
     let grid_rows = pivot_logs(&items, &logs);
 
     Ok(layout(
@@ -370,20 +368,20 @@ pub async fn add_balance(
     user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
 
     let log_date_str = form
         .get("log_date")
         .ok_or_else(|| AppError::BadRequest("Missing log date field".into()))?;
     let log_date = NaiveDate::parse_from_str(log_date_str, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
     for item in &items {
         let key = format!("balance_{}", item.item_id);
         if let Some(value) = form.get(&key)
             && let Ok(cents) = utils::parse_dollars(value)
         {
-            portfolio::insert_balance_log(state.db(), item.item_id, log_date, cents).await?;
+            portfolio::insert_balance_log(&state.db().await, item.item_id, log_date, cents).await?;
         }
     }
 
@@ -394,7 +392,7 @@ pub async fn add_balance(
         .map(|(i, wi)| (wi.item_id, i))
         .collect();
 
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
     let values: Vec<Option<i64>> = items
         .iter()
         .map(|item| {
@@ -470,13 +468,13 @@ pub async fn edit_cell(
     user: LoggedInUser,
     axum::extract::Query(query): axum::extract::Query<CellQuery>,
 ) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let item_id = Uuid::parse_str(&query.item_id)
         .map_err(|_| AppError::BadRequest("Invalid item ID.".into()))?;
     let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
 
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
     let current_cents = logs
         .iter()
         .find(|l| l.item_id == item_id && l.log_date == date)
@@ -524,7 +522,7 @@ pub async fn save_cell(
     user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let item_id_str = form
         .get("item_id")
         .ok_or_else(|| AppError::BadRequest("Missing item_id".into()))?;
@@ -553,7 +551,7 @@ pub async fn save_cell(
     }
 
     let cents = utils::parse_dollars(value_str).map_err(AppError::BadRequest)?;
-    portfolio::upsert_balance_log(state.db(), item_id, date, cents).await?;
+    portfolio::upsert_balance_log(&state.db().await, item_id, date, cents).await?;
 
     Ok(maud::html! {
         td id=(cell_id) class="editable" tabindex="0"
@@ -578,7 +576,7 @@ pub async fn edit_date(
     user: LoggedInUser,
     axum::extract::Query(query): axum::extract::Query<DateQuery>,
 ) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
 
@@ -697,7 +695,7 @@ pub async fn save_date(
     user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let old_date_str = form
         .get("old_date")
         .ok_or_else(|| AppError::BadRequest("Missing old_date".into()))?;
@@ -707,8 +705,8 @@ pub async fn save_date(
     let old_date = NaiveDate::parse_from_str(old_date_str, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid old date format. Use YYYY-MM-DD.".into()))?;
 
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
 
     // If new_date is invalid, re-render the original row with an error
     let new_date = match NaiveDate::parse_from_str(new_date_str, "%Y-%m-%d") {
@@ -744,7 +742,7 @@ pub async fn save_date(
         return Ok(render_data_row(portfolio_id, &items, old_date, &values));
     }
 
-    match portfolio::rename_date(state.db(), portfolio_id, old_date, new_date).await {
+    match portfolio::rename_date(&state.db().await, portfolio_id, old_date, new_date).await {
         Ok(_) => {}
         Err(AppError::BadRequest(msg)) => {
             let values: Vec<Option<i64>> = items
@@ -785,12 +783,12 @@ pub async fn get_row(
     user: LoggedInUser,
     axum::extract::Query(query): axum::extract::Query<DateQuery>,
 ) -> Result<maud::Markup, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
 
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
     let values: Vec<Option<i64>> = items
         .iter()
         .map(|item| {
@@ -809,7 +807,7 @@ pub async fn save_item_name(
     user: LoggedInUser,
     axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let item_id_str = form
         .get("item_id")
         .ok_or_else(|| AppError::BadRequest("Missing item_id".into()))?;
@@ -822,7 +820,7 @@ pub async fn save_item_name(
         return Err(AppError::BadRequest("Item name cannot be empty".into()));
     }
 
-    portfolio::rename_wealth_item(state.db(), item_id, name.trim()).await?;
+    portfolio::rename_wealth_item(&state.db().await, item_id, name.trim()).await?;
     Ok(axum::response::Redirect::to(&format!(
         "/portfolio/{}",
         portfolio_id
@@ -846,12 +844,12 @@ pub async fn change_item_type(
     user: LoggedInUser,
     axum::Form(form): axum::Form<ChangeTypeForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     let valid_types = ["asset", "cash", "debt", "investment"];
     if !valid_types.contains(&form.item_type.as_str()) {
         return Err(AppError::BadRequest("Invalid item type".into()));
     }
-    portfolio::change_wealth_item_type(state.db(), form.item_id, &form.item_type).await?;
+    portfolio::change_wealth_item_type(&state.db().await, form.item_id, &form.item_type).await?;
     Ok(axum::response::Redirect::to(&format!(
         "/portfolio/{}",
         portfolio_id
@@ -864,8 +862,8 @@ pub async fn delete_item(
     user: LoggedInUser,
     axum::Form(form): axum::Form<DeleteItemForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    portfolio::delete_wealth_item(state.db(), form.item_id).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
+    portfolio::delete_wealth_item(&state.db().await, form.item_id).await?;
     Ok(axum::response::Redirect::to(&format!(
         "/portfolio/{}",
         portfolio_id
@@ -873,7 +871,7 @@ pub async fn delete_item(
 }
 
 pub async fn dashboard(State(state): State<AppState>, user: LoggedInUser) -> impl IntoResponse {
-    let username = user::get_username_by_id(state.db(), user.0)
+    let username = user::get_username_by_id(&state.db().await, user.0)
         .await
         .unwrap_or_else(|_| "User".to_string());
     let hour = chrono::Local::now()
@@ -903,6 +901,10 @@ pub async fn dashboard(State(state): State<AppState>, user: LoggedInUser) -> imp
                     h3 { "Reconcile" }
                     p { "Match outgoing transactions to reconciled records" }
                 }
+                a href="/settings" class="card" {
+                    h3 { "Settings" }
+                    p { "Configure backups and preferences" }
+                }
             }
         },
         Some(&user),
@@ -913,7 +915,7 @@ pub async fn insights(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let portfolios = portfolio::list_portfolios(state.db(), user.0).await?;
+    let portfolios = portfolio::list_portfolios(&state.db().await, user.0).await?;
 
     // Build portfolio selector links
     let portfolio_links: Vec<maud::Markup> = portfolios
@@ -944,15 +946,15 @@ pub async fn insights_chart(
     user: LoggedInUser,
     Path(portfolio_id): Path<Uuid>,
 ) -> Result<maud::Markup, AppError> {
-    let portfolios = portfolio::list_portfolios(state.db(), user.0).await?;
+    let portfolios = portfolio::list_portfolios(&state.db().await, user.0).await?;
     let portfolio_name = portfolios
         .iter()
         .find(|(pid, _)| pid == &portfolio_id)
         .map(|(_, pname)| pname.clone())
         .unwrap_or_else(|| "Unknown".to_string());
 
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
 
     // Get unique dates sorted ascending
     let mut dates: Vec<String> = logs
@@ -1195,7 +1197,7 @@ pub async fn reconcile_list(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let sessions = reconcile::list_sessions(state.db(), user.0).await?;
+    let sessions = reconcile::list_sessions(&state.db().await, user.0).await?;
     Ok(layout(
         "Reconcile",
         maud::html! {
@@ -1248,7 +1250,7 @@ pub async fn reconcile_create(
     if form.name.trim().is_empty() {
         return Err(AppError::BadRequest("Session name is required".into()));
     }
-    let id = reconcile::create_session(state.db(), user.0, form.name.trim()).await?;
+    let id = reconcile::create_session(&state.db().await, user.0, form.name.trim()).await?;
     Ok(axum::response::Redirect::to(&format!("/reconcile/{}", id)))
 }
 
@@ -1257,8 +1259,8 @@ pub async fn reconcile_delete(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
-    reconcile::delete_session(state.db(), session_id).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    reconcile::delete_session(&state.db().await, session_id).await?;
     Ok(axum::response::Redirect::to("/reconcile"))
 }
 
@@ -1267,10 +1269,10 @@ pub async fn reconcile_detail(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let (_, name) = reconcile::get_session(state.db(), session_id, user.0).await?;
-    let outgoing = reconcile::list_outgoing(state.db(), session_id).await?;
-    let reconciled = reconcile::list_reconciled(state.db(), session_id).await?;
-    let matches = reconcile::list_matches(state.db(), session_id).await?;
+    let (_, name) = reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    let outgoing = reconcile::list_outgoing(&state.db().await, session_id).await?;
+    let reconciled = reconcile::list_reconciled(&state.db().await, session_id).await?;
+    let matches = reconcile::list_matches(&state.db().await, session_id).await?;
 
     // Build lookup: outgoing_id -> list of reconciled_ids
     let mut match_map: std::collections::HashMap<Uuid, Vec<Uuid>> =
@@ -1476,7 +1478,7 @@ pub async fn add_outgoing(
     user: LoggedInUser,
     axum::Form(form): axum::Form<AddTxnForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let date = NaiveDate::parse_from_str(&form.date, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
     let cents = utils::parse_dollars(&form.amount).map_err(AppError::BadRequest)?;
@@ -1484,7 +1486,7 @@ pub async fn add_outgoing(
         .vendor
         .map(|v| v.trim().to_string())
         .unwrap_or_default();
-    reconcile::add_outgoing(state.db(), session_id, date, cents, &vendor).await?;
+    reconcile::add_outgoing(&state.db().await, session_id, date, cents, &vendor).await?;
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
         session_id
@@ -1497,7 +1499,7 @@ pub async fn add_reconciled(
     user: LoggedInUser,
     axum::Form(form): axum::Form<AddTxnForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let date = NaiveDate::parse_from_str(&form.date, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
     let cents = utils::parse_dollars(&form.amount).map_err(AppError::BadRequest)?;
@@ -1505,7 +1507,7 @@ pub async fn add_reconciled(
         .vendor
         .map(|v| v.trim().to_string())
         .unwrap_or_default();
-    reconcile::add_reconciled(state.db(), session_id, date, cents, &vendor).await?;
+    reconcile::add_reconciled(&state.db().await, session_id, date, cents, &vendor).await?;
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
         session_id
@@ -1518,7 +1520,7 @@ pub async fn link_txns(
     user: LoggedInUser,
     body: axum::body::Bytes,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
     let mut outgoing_id: Option<Uuid> = None;
     let mut reconciled_ids: Vec<Uuid> = Vec::new();
@@ -1548,7 +1550,7 @@ pub async fn link_txns(
         ));
     }
     for reconciled_id in reconciled_ids {
-        reconcile::link_transactions(state.db(), outgoing_id, reconciled_id).await?;
+        reconcile::link_transactions(&state.db().await, outgoing_id, reconciled_id).await?;
     }
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
@@ -1567,13 +1569,13 @@ pub async fn unlink_txns(
     user: LoggedInUser,
     axum::Form(form): axum::Form<UnlinkForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let outgoing_id = Uuid::parse_str(&form.outgoing_id)
         .map_err(|_| AppError::BadRequest("Invalid outgoing ID".into()))?;
     // Find and remove all match_links for this outgoing
-    let matches = reconcile::list_matches(state.db(), session_id).await?;
+    let matches = reconcile::list_matches(&state.db().await, session_id).await?;
     for m in matches.iter().filter(|m| m.outgoing_id == outgoing_id) {
-        reconcile::unlink_transaction(state.db(), m.match_id).await?;
+        reconcile::unlink_transaction(&state.db().await, m.match_id).await?;
     }
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
@@ -1592,12 +1594,12 @@ pub async fn unlink_reconciled_txns(
     user: LoggedInUser,
     axum::Form(form): axum::Form<UnlinkReconciledForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let reconciled_id = Uuid::parse_str(&form.reconciled_id)
         .map_err(|_| AppError::BadRequest("Invalid reconciled ID".into()))?;
-    let matches = reconcile::list_matches(state.db(), session_id).await?;
+    let matches = reconcile::list_matches(&state.db().await, session_id).await?;
     for m in matches.iter().filter(|m| m.reconciled_id == reconciled_id) {
-        reconcile::unlink_transaction(state.db(), m.match_id).await?;
+        reconcile::unlink_transaction(&state.db().await, m.match_id).await?;
     }
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
@@ -1619,11 +1621,11 @@ async fn render_proposals_page(
     user: crate::cookies::LoggedInUser,
     skip_ids: &[Uuid],
 ) -> Result<maud::Markup, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
-    let proposals = reconcile::auto_match(state.db(), session_id, skip_ids).await?;
-    let (_, name) = reconcile::get_session(state.db(), session_id, user.0).await?;
-    let outgoing = reconcile::list_outgoing(state.db(), session_id).await?;
-    let reconciled = reconcile::list_reconciled(state.db(), session_id).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    let proposals = reconcile::auto_match(&state.db().await, session_id, skip_ids).await?;
+    let (_, name) = reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    let outgoing = reconcile::list_outgoing(&state.db().await, session_id).await?;
+    let reconciled = reconcile::list_reconciled(&state.db().await, session_id).await?;
 
     Ok(layout(
         &format!("Reconcile — {}", name),
@@ -1718,7 +1720,7 @@ pub async fn confirm_proposal(
     user: LoggedInUser,
     body: axum::body::Bytes,
 ) -> Result<maud::Markup, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
     let mut outgoing_id: Option<Uuid> = None;
     let mut reconciled_ids: Vec<Uuid> = Vec::new();
@@ -1748,7 +1750,7 @@ pub async fn confirm_proposal(
     // Apply this match
     if let Some(oid) = outgoing_id {
         for rid in &reconciled_ids {
-            reconcile::link_transactions(state.db(), oid, *rid).await?;
+            reconcile::link_transactions(&state.db().await, oid, *rid).await?;
         }
         skip_ids.push(oid);
     }
@@ -1762,7 +1764,7 @@ pub async fn confirm_all_proposals(
     user: LoggedInUser,
     body: axum::body::Bytes,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
     let mut skip_ids: Vec<Uuid> = Vec::new();
     for pair in body_str.split('&') {
@@ -1773,10 +1775,10 @@ pub async fn confirm_all_proposals(
             skip_ids.push(id);
         }
     }
-    let proposals = reconcile::auto_match(state.db(), session_id, &skip_ids).await?;
+    let proposals = reconcile::auto_match(&state.db().await, session_id, &skip_ids).await?;
     for p in &proposals {
         for rid in &p.reconciled_ids {
-            reconcile::link_transactions(state.db(), p.outgoing_id, *rid).await?;
+            reconcile::link_transactions(&state.db().await, p.outgoing_id, *rid).await?;
         }
     }
     Ok(axum::response::Redirect::to(&format!(
@@ -1791,7 +1793,7 @@ pub async fn reject_proposal(
     user: LoggedInUser,
     body: axum::body::Bytes,
 ) -> Result<maud::Markup, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
     let mut rejected_id: Option<Uuid> = None;
     let mut skip_ids: Vec<Uuid> = Vec::new();
@@ -1826,14 +1828,14 @@ pub async fn rename_session(
     user: LoggedInUser,
     axum::Form(form): axum::Form<RenameSessionForm>,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     if form.name.trim().is_empty() {
         return Err(AppError::BadRequest("Session name cannot be empty".into()));
     }
     sqlx::query("UPDATE reconcile_sessions SET name = ? WHERE session_id = ?")
         .bind(form.name.trim())
         .bind(session_id.to_string())
-        .execute(state.db())
+        .execute(&state.db().await)
         .await?;
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
@@ -1866,8 +1868,8 @@ async fn upload_csv(
     mut multipart: axum::extract::Multipart,
     kind: &str,
 ) -> Result<maud::Markup, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
-    let (_, name) = reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    let (_, name) = reconcile::get_session(&state.db().await, session_id, user.0).await?;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -2007,7 +2009,7 @@ async fn confirm_csv_import(
     body: axum::body::Bytes,
     kind: &str,
 ) -> Result<axum::response::Redirect, AppError> {
-    reconcile::get_session(state.db(), session_id, user.0).await?;
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
     let mut tmp_id = String::new();
     let mut date_col: Option<usize> = None;
@@ -2054,9 +2056,9 @@ async fn confirm_csv_import(
     let rows = csv_import::parse_csv_with_mapping(&raw, &mapping)?;
 
     if kind == "outgoing" {
-        reconcile::bulk_add_outgoing(state.db(), session_id, &rows).await?;
+        reconcile::bulk_add_outgoing(&state.db().await, session_id, &rows).await?;
     } else {
-        reconcile::bulk_add_reconciled(state.db(), session_id, &rows).await?;
+        reconcile::bulk_add_reconciled(&state.db().await, session_id, &rows).await?;
     }
 
     Ok(axum::response::Redirect::to(&format!(
@@ -2276,7 +2278,7 @@ pub async fn portfolio_import(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<maud::Markup, AppError> {
-    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    let (_id, name) = portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
     Ok(layout(
         &format!("Import CSV — {}", name),
         maud::html! {
@@ -2314,7 +2316,7 @@ pub async fn portfolio_import_post(
     user: LoggedInUser,
     mut multipart: axum::extract::Multipart,
 ) -> Result<maud::Markup, AppError> {
-    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    let (_id, name) = portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
 
     let mut csv_data = String::new();
     while let Some(field) = multipart
@@ -2349,7 +2351,7 @@ pub async fn portfolio_import_post(
         .map_err(|e| AppError::BadRequest(format!("Failed to save CSV: {}", e)))?;
 
     // Load existing wealth items for mapping
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
 
     let num_cols = analysis.preview_rows.first().map(|r| r.len()).unwrap_or(0);
     let col_numbers: Vec<usize> = (0..num_cols).collect();
@@ -2462,7 +2464,7 @@ pub async fn portfolio_import_confirm(
     user: LoggedInUser,
     body: axum::body::Bytes,
 ) -> Result<axum::response::Redirect, AppError> {
-    portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
+    portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
 
     let body_str = String::from_utf8_lossy(&body);
     let mut tmp_id = String::new();
@@ -2551,7 +2553,7 @@ pub async fn portfolio_import_confirm(
         columns,
     };
 
-    let result = portfolio::import_csv(state.db(), portfolio_id, &raw, &mapping).await?;
+    let result = portfolio::import_csv(&state.db().await, portfolio_id, &raw, &mapping).await?;
 
     let flash_msg = format!(
         "Imported {} rows ({} skipped, {} items created)",
@@ -2573,9 +2575,9 @@ pub async fn portfolio_csv(
     State(state): State<AppState>,
     user: LoggedInUser,
 ) -> Result<impl IntoResponse, AppError> {
-    let (_id, name) = portfolio::get_portfolio(state.db(), portfolio_id, user.0).await?;
-    let items = portfolio::list_wealth_items(state.db(), portfolio_id).await?;
-    let logs = portfolio::list_balance_logs(state.db(), portfolio_id).await?;
+    let (_id, name) = portfolio::get_portfolio(&state.db().await, portfolio_id, user.0).await?;
+    let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
+    let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
 
     // Track which items are debts so we export them as negative
     let debt_ids: std::collections::HashSet<Uuid> = items
@@ -2646,4 +2648,921 @@ pub async fn not_found(State(_state): State<AppState>) -> impl IntoResponse {
         },
         None,
     )
+}
+
+// ── Settings / Backup ──
+
+pub async fn settings(
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    Query(params): Query<SettingsFlash>,
+) -> Result<maud::Markup, AppError> {
+    let config = backup::get_config(&state.db().await).await?;
+    let username = user::get_username_by_id(&state.db().await, user.0)
+        .await
+        .unwrap_or_else(|_| "User".to_string());
+
+    let flash = params.flash.as_deref();
+
+    let (provider, bucket, path, region, endpoint, access_key_id, b2_key_id, b2_endpoint, _enabled) =
+        match &config {
+            Some(c) => (
+                c.provider.clone(),
+                c.bucket.clone(),
+                c.path.clone(),
+                c.region.clone(),
+                c.endpoint.clone(),
+                c.access_key_id.clone(),
+                c.b2_key_id.clone(),
+                c.b2_endpoint.clone(),
+                c.enabled,
+            ),
+            None => (
+                "s3".to_string(),
+                String::new(),
+                "financials-backups".to_string(),
+                "us-east-1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                false,
+            ),
+        };
+
+    let s3_style = if provider == "s3" { "" } else { "display:none" };
+    let b2_style = if provider == "b2" { "" } else { "display:none" };
+
+    let provider_options = if provider == "s3" {
+        maud::html! {
+            option value="s3" selected { "Amazon S3 / S3-compatible" }
+            option value="b2" { "Backblaze B2" }
+        }
+    } else {
+        maud::html! {
+            option value="s3" { "Amazon S3 / S3-compatible" }
+            option value="b2" selected { "Backblaze B2" }
+        }
+    };
+
+    let enable_disable_btn = match &config {
+        Some(c) if c.enabled => Some(maud::html! {
+            button type="submit" formaction="/settings/backup/disable" class="btn btn-ghost" { "Pause Backups" }
+        }),
+        Some(_) => Some(maud::html! {
+            button type="submit" formaction="/settings/backup/enable" class="btn" { "Enable Backups" }
+        }),
+        None => None,
+    };
+
+    // Restore points are loaded asynchronously via HTMX
+    // to avoid blocking the settings page on listing remote snapshots
+
+    Ok(layout(
+        "Settings",
+        maud::html! {
+            h2 { "Settings" }
+            p { "Hello, " (username) }
+
+            div class="settings-tabs" {
+                button class="tab-btn active" data-tab="backup" { "Backup" }
+                button class="tab-btn" data-tab="restore" { "Restore" }
+            }
+
+            @if let Some(msg) = flash {
+                @if msg == "saved" {
+                    div class="flash flash-success" { "Configuration saved" }
+                } @else if msg == "enabled" {
+                    div class="flash flash-success" { "Backups enabled" }
+                } @else if msg == "disabled" {
+                    div class="flash flash-info" { "Backups paused" }
+                } @else if msg == "restored" {
+                    div class="flash flash-success" { "Database restored from backup" }
+                } @else if msg == "restore_failed" {
+                    div class="flash flash-error" { "Restore failed — check server logs for details" }
+                }
+            }
+
+            div id="backup" class="tab-content" {
+                h3 { "Database Backups" }
+                p { "Automatically back up your financial data to cloud storage. Choose a provider and enter your credentials." }
+
+                @if config.is_some() {
+                    div class="backup-status" {
+                        @if let Some(c) = &config {
+                            @if c.enabled {
+                                div class="flash flash-success" { "Backups are active" }
+                            } @else {
+                                div class="flash flash-warning" { "Backups are paused" }
+                            }
+                        }
+                        p class="backup-detail" {
+                            "Provider: " (match &config { Some(c) => c.provider.clone(), None => String::new() })
+                            " | Bucket: " (match &config { Some(c) => c.bucket.clone(), None => String::new() })
+                        }
+                    }
+                }
+
+                form action="/settings/backup" method="post" class="settings-form" {
+                    label { "Provider"
+                        select name="provider" id="provider-select" {
+                            (provider_options)
+                        }
+                    }
+
+                    label { "Bucket Name"
+                        input type="text" name="bucket" value=(bucket) placeholder="my-backup-bucket";
+                    }
+                    label { "Backup Path Prefix"
+                        input type="text" name="path" value=(path) placeholder="financials-backups";
+                    }
+                    label { "Snapshot interval (minutes)"
+                        input type="number" name="interval_minutes" value=(config.as_ref().map(|c| c.interval_minutes.to_string()).unwrap_or_else(|| "60".to_string())) min="5" max="10080" placeholder="60";
+                    }
+                    label { "Max snapshots to keep"
+                        input type="number" name="max_snapshots" value=(config.as_ref().map(|c| c.max_snapshots.to_string()).unwrap_or_else(|| "10".to_string())) min="1" max="1000" placeholder="10";
+                    }
+
+                    div id="s3-fields" style=(s3_style) {
+                        label { "Region"
+                            input type="text" name="region" value=(region) placeholder="us-east-1";
+                        }
+                        label { "Custom Endpoint (optional — leave empty for AWS)"
+                            input type="text" name="endpoint" value=(endpoint.unwrap_or_default()) placeholder="https://s3.example.com";
+                        }
+                        label { "Access Key ID"
+                            input type="text" name="access_key_id" value=(access_key_id.unwrap_or_default()) autocomplete="off";
+                        }
+                        label { "Secret Access Key"
+                            input type="password" name="secret_access_key" autocomplete="new-password" placeholder="Enter your secret key";
+                        }
+                    }
+
+                    div id="b2-fields" style=(b2_style) {
+                        label { "S3 Endpoint"
+                            input type="text" name="b2_endpoint" value=(b2_endpoint.unwrap_or_else(|| "s3.us-west-004.backblazeb2.com".to_string())) placeholder="s3.us-west-004.backblazeb2.com";
+                        }
+                        label { "Key ID"
+                            input type="text" name="b2_key_id" value=(b2_key_id.unwrap_or_default()) autocomplete="off";
+                        }
+                        label { "Application Key"
+                            input type="password" name="b2_application_key" autocomplete="new-password" placeholder="Enter your application key";
+                        }
+                    }
+
+                    div class="settings-actions" {
+                        button type="submit" class="btn" { "Save Configuration" }
+                        @if let Some(btn) = enable_disable_btn {
+                            (btn)
+                        }
+                    }
+                }
+
+                @if config.as_ref().is_some_and(|c| c.enabled) {
+                    form action="/settings/backup/snapshot" method="post" class="settings-form" {
+                        button type="submit" class="btn" { "Create Snapshot Now" }
+                    }
+                }
+            }
+
+            div id="restore" class="tab-content" style="display:none" {
+                h3 { "Restore from Backup" }
+                p { "Restore your database from a remote snapshot. \
+                     This will replace your current database with the backup version." }
+
+                @if config.is_some() {
+                    div class="backup-status" {
+                        p class="backup-detail" {
+                            "Will restore from: "
+                            (match &config { Some(c) => c.provider.clone(), None => String::new() })
+                            " | Bucket: "
+                            (match &config { Some(c) => c.bucket.clone(), None => String::new() })
+                        }
+                    }
+
+                    div class="flash flash-warning" {
+                        "Warning: This will replace your current database with the backup. \
+                         Any changes made since the backup point will be lost."
+                    }
+
+                    form action="/settings/backup/restore" method="post" class="settings-form" {
+                        @if config.is_some() {
+                            div class="form-group" {
+                                label { "Restore point"
+                                    div id="restore-points" hx-get="/settings/backup/restore-points" hx-trigger="load" hx-swap="innerHTML" {
+                                        select name="timestamp" disabled {
+                                            option { "Loading..." }
+                                        }
+                                    }
+                                }
+                                p class="form-hint" { "Each entry is a full snapshot of the database at that point in time. \
+                                    Choose the snapshot you want to restore to, or select Latest for the most recent." }
+                            }
+                        } @else {
+                            p class="form-hint" { "No backup configuration found. Configure backups first." }
+                        }
+                        div class="settings-actions" {
+                            button type="submit" class="btn btn-ghost" { "Restore from Backup" }
+                        }
+                    }
+                } @else {
+                    div class="flash flash-warning" {
+                        "No backup configuration found. Configure backups first."
+                    }
+                }
+            }
+
+            script type="text/javascript" {
+                (maud::PreEscaped("document.getElementById('provider-select').addEventListener('change', function() { var showS3 = this.value === 's3'; var showB2 = this.value === 'b2'; document.getElementById('s3-fields').style.display = showS3 ? '' : 'none'; document.getElementById('b2-fields').style.display = showB2 ? '' : 'none'; document.querySelectorAll('#s3-fields input, #s3-fields select').forEach(function(el) { el.disabled = !showS3; }); document.querySelectorAll('#b2-fields input, #b2-fields select').forEach(function(el) { el.disabled = !showB2; }); }); document.querySelectorAll('.tab-btn').forEach(function(btn) { btn.addEventListener('click', function() { document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); }); document.querySelectorAll('.tab-content').forEach(function(t) { t.style.display = 'none'; }); btn.classList.add('active'); document.getElementById(btn.dataset.tab).style.display = ''; }); }); (function() { var p = document.getElementById('provider-select').value; document.querySelectorAll('#s3-fields input, #s3-fields select').forEach(function(el) { el.disabled = p !== 's3'; }); document.querySelectorAll('#b2-fields input, #b2-fields select').forEach(function(el) { el.disabled = p !== 'b2'; }); })();"))
+            }
+        },
+        Some(&user),
+    ))
+}
+
+#[derive(serde::Deserialize)]
+pub struct SettingsFlash {
+    pub flash: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct BackupForm {
+    provider: String,
+    bucket: String,
+    path: String,
+    region: String,
+    endpoint: Option<String>,
+    access_key_id: Option<String>,
+    secret_access_key: Option<String>,
+    b2_bucket: Option<String>,
+    b2_path: Option<String>,
+    b2_region: Option<String>,
+    b2_key_id: Option<String>,
+    b2_application_key: Option<String>,
+    b2_endpoint: Option<String>,
+    interval_minutes: Option<i64>,
+    max_snapshots: Option<i64>,
+}
+
+pub async fn settings_backup_post(
+    State(state): State<AppState>,
+    _user: LoggedInUser,
+    Form(form): Form<BackupForm>,
+) -> Result<axum::response::Response, AppError> {
+    // Trim empty strings to None for optional fields
+    let endpoint = form.endpoint.filter(|s| !s.trim().is_empty());
+    let access_key_id = form.access_key_id.filter(|s| !s.trim().is_empty());
+    let secret_access_key = form.secret_access_key.filter(|s| !s.trim().is_empty());
+    let b2_key_id = form.b2_key_id.filter(|s| !s.trim().is_empty());
+    let b2_application_key = form.b2_application_key.filter(|s| !s.trim().is_empty());
+    let b2_endpoint = form.b2_endpoint.filter(|s| !s.trim().is_empty());
+
+    // Pick bucket/path/region based on provider
+    let (bucket, path, region) = if form.provider == "b2" {
+        (
+            form.b2_bucket
+                .clone()
+                .unwrap_or_else(|| form.bucket.clone()),
+            form.b2_path.clone().unwrap_or_else(|| form.path.clone()),
+            form.b2_region
+                .clone()
+                .unwrap_or_else(|| form.region.clone()),
+        )
+    } else {
+        (form.bucket.clone(), form.path.clone(), form.region.clone())
+    };
+
+    // If secret_access_key is empty and we have an existing config, keep the old one
+    let secret_access_key = match secret_access_key {
+        Some(s) => Some(s),
+        None => {
+            let existing = backup::get_config(&state.db().await).await?;
+            existing.and_then(|c| c.secret_access_key)
+        }
+    };
+    let b2_application_key = match b2_application_key {
+        Some(s) => Some(s),
+        None => {
+            let existing = backup::get_config(&state.db().await).await?;
+            existing.and_then(|c| c.b2_application_key)
+        }
+    };
+
+    let config = backup::BackupConfig {
+        id: Uuid::nil(), // Will be set by save_config if new
+        provider: form.provider,
+        bucket,
+        path,
+        region,
+        endpoint,
+        access_key_id,
+        secret_access_key,
+        b2_key_id,
+        b2_application_key,
+        b2_endpoint,
+        enabled: false,       // Start paused; user explicitly enables
+        db_instance_id: None, // Will be assigned by save_config
+        interval_minutes: form.interval_minutes.unwrap_or(60),
+        max_snapshots: form.max_snapshots.unwrap_or(10),
+    };
+
+    // Preserve existing enabled state if updating
+    let existing = backup::get_config(&state.db().await).await?;
+    let config = match existing {
+        Some(mut c) => {
+            c.provider = config.provider;
+            c.bucket = config.bucket;
+            c.path = config.path;
+            c.region = config.region;
+            c.endpoint = config.endpoint;
+            c.access_key_id = config.access_key_id;
+            c.secret_access_key = config.secret_access_key;
+            c.b2_key_id = config.b2_key_id;
+            c.b2_application_key = config.b2_application_key;
+            c.b2_endpoint = config.b2_endpoint;
+            c
+        }
+        None => config,
+    };
+
+    backup::save_config(&state.db().await, &config).await?;
+
+    // If the config is enabled, create a snapshot immediately
+    if config.enabled {
+        let pool = state.db().await.clone();
+        if let Err(e) = backup::create_snapshot(&pool, &state.db_path, &config).await {
+            tracing::warn!("Failed to create snapshot after saving config: {e:?}");
+        }
+    }
+
+    Ok(Redirect::to("/settings?flash=saved").into_response())
+}
+
+pub async fn settings_backup_enable(
+    State(state): State<AppState>,
+    _user: LoggedInUser,
+) -> Result<axum::response::Response, AppError> {
+    backup::set_enabled(&state.db().await, true).await?;
+    // Create a snapshot now that backups are enabled
+    if let Some(config) = backup::get_config(&state.db().await).await? {
+        let pool = state.db().await.clone();
+        if let Err(e) = backup::create_snapshot(&pool, &state.db_path, &config).await {
+            tracing::warn!("Failed to create snapshot on enable: {e:?}");
+        }
+    }
+    Ok(Redirect::to("/settings?flash=enabled").into_response())
+}
+
+pub async fn settings_backup_disable(
+    State(state): State<AppState>,
+    _user: LoggedInUser,
+) -> Result<axum::response::Response, AppError> {
+    backup::set_enabled(&state.db().await, false).await?;
+    Ok(Redirect::to("/settings?flash=disabled").into_response())
+}
+
+#[derive(serde::Deserialize)]
+pub struct RestoreForm {
+    pub timestamp: Option<String>,
+}
+
+pub async fn settings_backup_restore(
+    State(state): State<AppState>,
+    _user: LoggedInUser,
+    Form(form): Form<RestoreForm>,
+) -> Result<axum::response::Response, AppError> {
+    let config = backup::get_config(&state.db().await)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("No backup configuration found".into()))?;
+
+    // For restore, the "timestamp" field now holds the full snapshot key
+    let snapshot_key = form.timestamp.as_deref().unwrap_or("");
+
+    match backup::restore_from_snapshot(&state.db, &state.db_path, &config, snapshot_key).await {
+        Ok(()) => {
+            tracing::info!("Restore complete, pool reconnected");
+            // Re-seed admin user so the in-memory admin_user_id matches
+            // the restored DB (which may have a different user ID).
+            let pool = state.db().await;
+            let new_admin_id =
+                user::seed_admin(&pool, &state.admin_username, &state.admin_password_hash)
+                    .await
+                    .map_err(|e| {
+                        AppError::Internal(anyhow::anyhow!(
+                            "failed to re-seed admin after restore: {e:?}"
+                        ))
+                    })?;
+            *state.admin_user_id.write().unwrap() = new_admin_id;
+            drop(pool);
+            tracing::info!("Admin user re-synced after restore (id={new_admin_id})");
+            // Redirect to login — the old session cookie has a stale user_id
+            // that may not exist in the restored DB, so the user must re-authenticate.
+            Ok(Redirect::to("/login?flash=restored").into_response())
+        }
+        Err(e) => {
+            tracing::error!("Restore failed: {e:?}");
+            Ok(Redirect::to("/settings?flash=restore_failed").into_response())
+        }
+    }
+}
+
+/// HTMX endpoint: returns the snapshot dropdown HTML asynchronously.
+pub async fn settings_backup_restore_points(
+    State(state): State<AppState>,
+    _user: LoggedInUser,
+) -> Result<maud::Markup, AppError> {
+    let config = backup::get_config(&state.db().await)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("No backup configuration found".into()))?;
+
+    let snapshots = backup::list_all_snapshots(&config)
+        .await
+        .unwrap_or_default();
+
+    Ok(maud::html! {
+        select name="timestamp" {
+            @for snapshot in &snapshots {
+                @let size_kb = snapshot.size as f64 / 1024.0;
+                @let size_str = if size_kb >= 1024.0 {
+                    format!("{:.1} MB", size_kb / 1024.0)
+                } else {
+                    format!("{:.0} KB", size_kb)
+                };
+                @let display_ts = chrono::DateTime::parse_from_rfc3339(&snapshot.timestamp)
+                    .map(|dt| dt.with_timezone(&chrono::Local).format("%d %b %Y, %I:%M %p").to_string())
+                    .unwrap_or_else(|_| snapshot.timestamp.clone());
+                option value=(snapshot.key) {
+                    (format!("{} — {}", display_ts, size_str))
+                }
+            }
+        }
+    })
+}
+
+/// Authenticated snapshot trigger POST handler.
+/// Creates a snapshot immediately and redirects back to settings.
+pub async fn settings_backup_snapshot(
+    State(state): State<AppState>,
+    _user: LoggedInUser,
+) -> Result<axum::response::Response, AppError> {
+    let config = backup::get_config(&state.db().await)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("No backup configuration found".into()))?;
+
+    match backup::create_snapshot(&state.db().await, &state.db_path, &config).await {
+        Ok(key) => {
+            tracing::info!("Snapshot created: {key}");
+            Ok(Redirect::to("/settings?flash=snapshot_created").into_response())
+        }
+        Err(e) => {
+            tracing::error!("Snapshot failed: {e:?}");
+            Ok(Redirect::to("/settings?flash=snapshot_failed").into_response())
+        }
+    }
+}
+
+// ── Public backup page (no auth required) ──
+
+/// A backup configuration form submitted to the public backup page.
+/// This is needed because when the DB is lost, there's no stored config.
+#[derive(Deserialize)]
+pub struct PublicBackupForm {
+    pub provider: String,
+    pub bucket: String,
+    pub path: String,
+    pub region: Option<String>,
+    pub endpoint: Option<String>,
+    pub access_key_id: Option<String>,
+    pub secret_access_key: Option<String>,
+    pub b2_region: Option<String>,
+    pub b2_key_id: Option<String>,
+    pub b2_application_key: Option<String>,
+    pub b2_endpoint: Option<String>,
+    pub interval_minutes: Option<i64>,
+    pub max_snapshots: Option<i64>,
+}
+
+/// Public backup page — accessible without login.
+/// Shows backup status and allows configuring/restoring from remote snapshots.
+/// This is essential for disaster recovery: if the DB is lost, the user has
+/// no login credentials, so this page must work without authentication.
+pub async fn backup_page(
+    State(state): State<AppState>,
+    Query(params): Query<SettingsFlash>,
+) -> Result<maud::Markup, AppError> {
+    // Try to load config from DB — may fail if DB is corrupt/missing
+    let config = backup::get_config(&state.db().await).await.ok().flatten();
+
+    let flash = params.flash.as_deref();
+
+    let (provider, bucket, path, region, endpoint, access_key_id, b2_key_id, b2_endpoint) =
+        match &config {
+            Some(c) => (
+                c.provider.clone(),
+                c.bucket.clone(),
+                c.path.clone(),
+                c.region.clone(),
+                c.endpoint.clone(),
+                c.access_key_id.clone(),
+                c.b2_key_id.clone(),
+                c.b2_endpoint.clone(),
+            ),
+            None => (
+                "s3".to_string(),
+                String::new(),
+                "financials-backups".to_string(),
+                "us-east-1".to_string(),
+                None,
+                None,
+                None,
+                None,
+            ),
+        };
+
+    let s3_style = if provider == "s3" { "" } else { "display:none" };
+    let b2_style = if provider == "b2" { "" } else { "display:none" };
+
+    let provider_options = if provider == "s3" {
+        maud::html! {
+            option value="s3" selected { "Amazon S3 / S3-compatible" }
+            option value="b2" { "Backblaze B2" }
+        }
+    } else {
+        maud::html! {
+            option value="s3" { "Amazon S3 / S3-compatible" }
+            option value="b2" selected { "Backblaze B2" }
+        }
+    };
+
+    let enable_disable_btn = match &config {
+        Some(c) if c.enabled => Some(maud::html! {
+            button type="submit" formaction="/backup/disable" class="btn btn-ghost" { "Pause Backups" }
+        }),
+        Some(_) => Some(maud::html! {
+            button type="submit" formaction="/backup/enable" class="btn" { "Enable Backups" }
+        }),
+        None => None,
+    };
+
+    Ok(layout(
+        "Backup & Restore",
+        maud::html! {
+            h2 { "Backup & Restore" }
+            p { "Disaster recovery page — accessible without login." }
+
+            div class="settings-tabs" {
+                button class="tab-btn active" data-tab="backup" { "Backup" }
+                button class="tab-btn" data-tab="restore" { "Restore" }
+            }
+
+            @if let Some(msg) = flash {
+                @if msg == "saved" {
+                    div class="flash flash-success" { "Configuration saved" }
+                } @else if msg == "enabled" {
+                    div class="flash flash-success" { "Backups enabled" }
+                } @else if msg == "disabled" {
+                    div class="flash flash-info" { "Backups paused" }
+                } @else if msg == "restored" {
+                    div class="flash flash-success" { "Database restored from backup" }
+                } @else if msg == "restore_failed" {
+                    div class="flash flash-error" { "Restore failed — check server logs for details" }
+                }
+            }
+
+            div id="backup" class="tab-content" {
+                h3 { "Database Backups" }
+                p { "Automatically back up your financial data to cloud storage. Choose a provider and enter your credentials." }
+
+                @if config.is_some() {
+                    div class="backup-status" {
+                        @if let Some(c) = &config {
+                            @if c.enabled {
+                                div class="flash flash-success" { "Backups are active" }
+                            } @else {
+                                div class="flash flash-warning" { "Backups are paused" }
+                            }
+                        }
+                        p class="backup-detail" {
+                            "Provider: " (match &config { Some(c) => c.provider.clone(), None => String::new() })
+                            " | Bucket: " (match &config { Some(c) => c.bucket.clone(), None => String::new() })
+                        }
+                    }
+                }
+
+                form action="/backup/configure" method="post" class="settings-form" {
+                    label { "Provider"
+                        select name="provider" id="provider-select" {
+                            (provider_options)
+                        }
+                    }
+
+                    label { "Bucket"
+                        input type="text" name="bucket" value=(bucket);
+                    }
+                    label { "Path (prefix)"
+                        input type="text" name="path" value=(path) placeholder="db-backups";
+                    }
+                    label { "Snapshot interval (minutes)"
+                        input type="number" name="interval_minutes" value=(config.as_ref().map(|c| c.interval_minutes.to_string()).unwrap_or_else(|| "60".to_string())) min="5" max="10080" placeholder="60";
+                    }
+                    label { "Max snapshots to keep"
+                        input type="number" name="max_snapshots" value=(config.as_ref().map(|c| c.max_snapshots.to_string()).unwrap_or_else(|| "10".to_string())) min="1" max="1000" placeholder="10";
+                    }
+
+                    div id="s3-fields" style=(s3_style) {
+                        label { "Region"
+                            input type="text" name="region" value=(region);
+                        }
+                        label { "Endpoint (optional, for S3-compatible storage)"
+                            input type="text" name="endpoint" value=(endpoint.unwrap_or_default());
+                        }
+                        label { "Access Key ID"
+                            input type="text" name="access_key_id" value=(access_key_id.unwrap_or_default());
+                        }
+                        label { "Secret Access Key"
+                            input type="password" name="secret_access_key" placeholder="(unchanged if blank)";
+                        }
+                    }
+
+                    div id="b2-fields" style=(b2_style) {
+                        label { "Region"
+                            input type="text" name="b2_region" value=(region);
+                        }
+                        label { "B2 Key ID"
+                            input type="text" name="b2_key_id" value=(b2_key_id.unwrap_or_default());
+                        }
+                        label { "B2 Application Key"
+                            input type="password" name="b2_application_key" placeholder="(unchanged if blank)";
+                        }
+                        label { "B2 Endpoint (leave default unless custom)"
+                            input type="text" name="b2_endpoint" value=(b2_endpoint.unwrap_or_default()) placeholder="s3.us-west-004.backblazeb2.com";
+                        }
+                    }
+
+                    div class="form-actions" {
+                        button type="submit" class="btn" { "Save Configuration" }
+                        @if let Some(btn) = enable_disable_btn {
+                            (btn)
+                        }
+                    }
+                }
+
+                @if config.as_ref().is_some_and(|c| c.enabled) {
+                    form action="/backup/snapshot" method="post" class="settings-form" {
+                        button type="submit" class="btn" { "Create Snapshot Now" }
+                    }
+                }
+            }
+
+            div id="restore" class="tab-content" style="display:none" {
+                h3 { "Restore from Backup" }
+                p { "Restore the database from a remote backup snapshot. This will replace the current database." }
+
+                form action="/backup/restore" method="post" class="settings-form" {
+                    label { "Restore Point"
+                        div hx-get="/backup/restore-points" hx-trigger="load" hx-swap="innerHTML" {
+                            "Loading restore points..."
+                        }
+                    }
+                    button type="submit" class="btn btn-danger" { "Restore Database" }
+                }
+            }
+
+            script {
+                (maud::PreEscaped(
+                    "document.querySelectorAll('.tab-btn').forEach(btn => {
+                        btn.addEventListener('click', function() {
+                            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                            this.classList.add('active');
+                            document.querySelectorAll('.tab-content').forEach(tc => tc.style.display = 'none');
+                            document.getElementById(this.dataset.tab).style.display = 'block';
+                        });
+                    });
+                    document.getElementById('provider-select').addEventListener('change', function() {
+                        var showS3 = this.value === 's3';
+                        var showB2 = this.value === 'b2';
+                        document.getElementById('s3-fields').style.display = showS3 ? 'block' : 'none';
+                        document.getElementById('b2-fields').style.display = showB2 ? 'block' : 'none';
+                        document.querySelectorAll('#s3-fields input, #s3-fields select').forEach(function(el) { el.disabled = !showS3; });
+                        document.querySelectorAll('#b2-fields input, #b2-fields select').forEach(function(el) { el.disabled = !showB2; });
+                    });
+                    // Init: disable inputs in the hidden provider section
+                    (function() {
+                        var p = document.getElementById('provider-select').value;
+                        document.querySelectorAll('#s3-fields input, #s3-fields select').forEach(function(el) { el.disabled = p !== 's3'; });
+                        document.querySelectorAll('#b2-fields input, #b2-fields select').forEach(function(el) { el.disabled = p !== 'b2'; });
+                    })();"
+                ))
+            }
+        },
+        None,
+    ))
+}
+
+/// Public backup configuration POST handler.
+pub async fn backup_configure(
+    State(state): State<AppState>,
+    Form(form): Form<PublicBackupForm>,
+) -> Result<axum::response::Response, AppError> {
+    let endpoint = form.endpoint.filter(|s| !s.trim().is_empty());
+    let access_key_id = form.access_key_id.filter(|s| !s.trim().is_empty());
+    let secret_access_key = form.secret_access_key.filter(|s| !s.trim().is_empty());
+    let b2_key_id = form.b2_key_id.filter(|s| !s.trim().is_empty());
+    let b2_application_key = form.b2_application_key.filter(|s| !s.trim().is_empty());
+    let b2_endpoint = form.b2_endpoint.filter(|s| !s.trim().is_empty());
+
+    // Pick region based on provider
+    let region = if form.provider == "b2" {
+        form.b2_region
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "us-east-1".to_string())
+    } else {
+        form.region
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "us-east-1".to_string())
+    };
+
+    // Preserve existing secrets if not re-entered
+    let secret_access_key = match secret_access_key {
+        Some(s) => Some(s),
+        None => {
+            let existing = backup::get_config(&state.db().await).await?;
+            existing.and_then(|c| c.secret_access_key)
+        }
+    };
+    let b2_application_key = match b2_application_key {
+        Some(s) => Some(s),
+        None => {
+            let existing = backup::get_config(&state.db().await).await?;
+            existing.and_then(|c| c.b2_application_key)
+        }
+    };
+
+    let config = backup::BackupConfig {
+        id: uuid::Uuid::nil(), // Will be set by save_config if new
+        provider: form.provider,
+        bucket: form.bucket,
+        path: form.path,
+        region,
+        endpoint,
+        access_key_id,
+        secret_access_key,
+        b2_key_id,
+        b2_application_key,
+        b2_endpoint,
+        enabled: false,       // Start paused; user explicitly enables
+        db_instance_id: None, // Will be assigned by save_config
+        interval_minutes: form.interval_minutes.unwrap_or(60),
+        max_snapshots: form.max_snapshots.unwrap_or(10),
+    };
+
+    // Preserve existing enabled state if updating
+    let existing = backup::get_config(&state.db().await).await?;
+    let config = match existing {
+        Some(mut c) => {
+            c.provider = config.provider;
+            c.bucket = config.bucket;
+            c.path = config.path;
+            c.region = config.region;
+            c.endpoint = config.endpoint;
+            c.access_key_id = config.access_key_id;
+            c.secret_access_key = config.secret_access_key;
+            c.b2_key_id = config.b2_key_id;
+            c.b2_application_key = config.b2_application_key;
+            c.b2_endpoint = config.b2_endpoint;
+            c
+        }
+        None => config,
+    };
+
+    backup::save_config(&state.db().await, &config).await?;
+
+    // If the config is enabled, create a snapshot immediately
+    if config.enabled {
+        let pool = state.db().await.clone();
+        if let Err(e) = backup::create_snapshot(&pool, &state.db_path, &config).await {
+            tracing::warn!("Failed to create snapshot after config save: {e:?}");
+        }
+    }
+
+    Ok(axum::response::Redirect::to("/backup?flash=saved").into_response())
+}
+
+/// Public backup enable POST handler.
+pub async fn backup_enable(
+    State(state): State<AppState>,
+) -> Result<axum::response::Response, AppError> {
+    backup::set_enabled(&state.db().await, true).await?;
+    // Create a snapshot now that backups are enabled
+    if let Some(config) = backup::get_config(&state.db().await).await? {
+        let pool = state.db().await.clone();
+        if let Err(e) = backup::create_snapshot(&pool, &state.db_path, &config).await {
+            tracing::warn!("Failed to create snapshot on enable: {e:?}");
+        }
+    }
+    Ok(axum::response::Redirect::to("/backup?flash=enabled").into_response())
+}
+
+/// Public backup disable POST handler.
+pub async fn backup_disable(
+    State(state): State<AppState>,
+) -> Result<axum::response::Response, AppError> {
+    backup::set_enabled(&state.db().await, false).await?;
+    Ok(axum::response::Redirect::to("/backup?flash=disabled").into_response())
+}
+
+/// Public backup restore POST handler.
+/// Downloads a snapshot from the remote bucket and swaps the database file.
+pub async fn backup_restore(
+    State(state): State<AppState>,
+    Form(form): Form<RestoreForm>,
+) -> Result<axum::response::Response, AppError> {
+    let config = backup::get_config(&state.db().await)
+        .await?
+        .ok_or_else(|| {
+            AppError::BadRequest(
+                "No backup configuration found. Configure backup settings first.".into(),
+            )
+        })?;
+
+    // The "timestamp" field now holds the full snapshot key
+    let snapshot_key = form.timestamp.as_deref().unwrap_or("");
+
+    match backup::restore_from_snapshot(&state.db, &state.db_path, &config, snapshot_key).await {
+        Ok(()) => {
+            tracing::info!("Restore complete, pool reconnected");
+            // Re-seed admin user so the in-memory admin_user_id matches
+            // the restored DB (which may have a different user ID).
+            let pool = state.db().await;
+            let new_admin_id =
+                user::seed_admin(&pool, &state.admin_username, &state.admin_password_hash)
+                    .await
+                    .map_err(|e| {
+                        AppError::Internal(anyhow::anyhow!(
+                            "failed to re-seed admin after restore: {e:?}"
+                        ))
+                    })?;
+            *state.admin_user_id.write().unwrap() = new_admin_id;
+            drop(pool);
+            tracing::info!("Admin user re-synced after restore (id={new_admin_id})");
+            Ok(Redirect::to("/login?flash=restored").into_response())
+        }
+        Err(e) => {
+            tracing::error!("Restore failed: {e:?}");
+            Ok(Redirect::to("/backup?flash=restore_failed").into_response())
+        }
+    }
+}
+
+/// Public snapshot list HTMX endpoint.
+pub async fn backup_restore_points(
+    State(state): State<AppState>,
+) -> Result<maud::Markup, AppError> {
+    let config = backup::get_config(&state.db().await)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("No backup configuration found".into()))?;
+
+    let snapshots = backup::list_all_snapshots(&config)
+        .await
+        .unwrap_or_default();
+
+    Ok(maud::html! {
+        select name="timestamp" {
+            @for snapshot in &snapshots {
+                @let size_kb = snapshot.size as f64 / 1024.0;
+                @let size_str = if size_kb >= 1024.0 {
+                    format!("{:.1} MB", size_kb / 1024.0)
+                } else {
+                    format!("{:.0} KB", size_kb)
+                };
+                @let display_ts = chrono::DateTime::parse_from_rfc3339(&snapshot.timestamp)
+                    .map(|dt| dt.with_timezone(&chrono::Local).format("%d %b %Y, %I:%M %p").to_string())
+                    .unwrap_or_else(|_| snapshot.timestamp.clone());
+                option value=(snapshot.key) {
+                    (format!("{} — {}", display_ts, size_str))
+                }
+            }
+        }
+    })
+}
+
+/// Public snapshot trigger POST handler.
+/// Creates a snapshot immediately and redirects back to the backup page.
+pub async fn backup_snapshot(
+    State(state): State<AppState>,
+) -> Result<axum::response::Response, AppError> {
+    let config = backup::get_config(&state.db().await)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("No backup configuration found".into()))?;
+
+    match backup::create_snapshot(&state.db().await, &state.db_path, &config).await {
+        Ok(key) => {
+            tracing::info!("Snapshot created: {key}");
+            Ok(Redirect::to("/backup?flash=snapshot_created").into_response())
+        }
+        Err(e) => {
+            tracing::error!("Snapshot failed: {e:?}");
+            Ok(Redirect::to("/backup?flash=snapshot_failed").into_response())
+        }
+    }
 }
