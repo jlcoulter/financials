@@ -39,6 +39,7 @@ fn try_parse_date(val: &str) -> Option<String> {
         "%Y/%m/%d",
         "%b %d, %Y",
         "%d %b %Y",
+        "%d %b %y",
         "%B %d, %Y",
         "%d %B %Y",
         "%m-%d-%Y",
