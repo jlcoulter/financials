@@ -1052,17 +1052,24 @@ pub async fn insights_chart(
         .render(&trend_chart)
         .unwrap_or_else(|_| "<p>Trend chart rendering failed</p>".to_string());
 
-    // Chart B: Cash Flow (grouped bar — positive = income, negative = expenses)
-    // Compute per-date totals for inflows vs outflows
-    let mut inflow: Vec<f64> = vec![0.0; dates.len()];
-    let mut outflow: Vec<f64> = vec![0.0; dates.len()];
-    for (i, name) in item_names.iter().enumerate() {
-        let item = items.iter().find(|it| &it.name == name).unwrap();
+    // Chart B: Cash Flow (grouped bar — per-period change, not cumulative)
+    // Compute per-date delta from previous date for each item.
+    // Positive changes = Income (assets up, debt down), negative changes = Expenses (assets down, debt up).
+    let mut income: Vec<f64> = vec![0.0; dates.len()];
+    let mut expenses: Vec<f64> = vec![0.0; dates.len()];
+    for (i, _name) in item_names.iter().enumerate() {
         for (j, &val) in values[i].iter().enumerate() {
-            if item.item_type == "debt" {
-                outflow[j] += val.abs();
+            let delta = if j == 0 {
+                // First period: use the absolute value as the starting cash flow
+                val
             } else {
-                inflow[j] += val;
+                // Subsequent periods: change from previous period
+                val - values[i][j - 1]
+            };
+            if delta > 0.0 {
+                income[j] += delta;
+            } else if delta < 0.0 {
+                expenses[j] += delta.abs();
             }
         }
     }
@@ -1094,8 +1101,8 @@ pub async fn insights_chart(
         );
 
     flow_chart = flow_chart
-        .series(Bar::new().name("Income").data(inflow))
-        .series(Bar::new().name("Expenses").data(outflow));
+        .series(Bar::new().name("Income").data(income))
+        .series(Bar::new().name("Expenses").data(expenses));
 
     let flow_html = HtmlRenderer::new("flow-chart", 900, 400)
         .theme(Theme::Dark)
