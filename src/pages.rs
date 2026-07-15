@@ -2047,8 +2047,22 @@ async fn upload_csv(
 
                             label { "Date format" }
                             select name="date_format" {
-                                @for fmt in &["%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y"] {
-                                    option value=(fmt) selected[*fmt == analysis.detected.date_format] { (fmt) }
+                                @for (fmt, label) in &[
+                                    ("%d/%m/%Y", "DD/MM/YYYY"),
+                                    ("%d/%m/%y", "DD/MM/YY"),
+                                    ("%Y-%m-%d", "YYYY-MM-DD"),
+                                    ("%m/%d/%Y", "MM/DD/YYYY"),
+                                    ("%m/%d/%y", "MM/DD/YY"),
+                                    ("%Y/%m/%d", "YYYY/MM/DD"),
+                                    ("%b %d, %Y", "Mon DD, YYYY"),
+                                    ("%d %b %Y", "DD Mon YYYY"),
+                                    ("%d %b %y", "DD Mon YY"),
+                                    ("%B %d, %Y", "Month DD, YYYY"),
+                                    ("%d %B %Y", "DD Month YYYY"),
+                                    ("%m-%d-%Y", "MM-DD-YYYY"),
+                                    ("%d-%m-%Y", "DD-MM-YYYY"),
+                                ] {
+                                    option value=(*fmt) selected[*fmt == analysis.detected.date_format] { (*label) }
                                 }
                             }
                         }
@@ -2495,8 +2509,22 @@ pub async fn portfolio_import_post(
 
                     label { "Date format" }
                     select name="date_format" {
-                        @for fmt in &["%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y"] {
-                            option value=(fmt) selected[*fmt == analysis.detected.date_format] { (fmt) }
+                        @for (fmt, label) in &[
+                            ("%d/%m/%Y", "DD/MM/YYYY"),
+                            ("%d/%m/%y", "DD/MM/YY"),
+                            ("%Y-%m-%d", "YYYY-MM-DD"),
+                            ("%m/%d/%Y", "MM/DD/YYYY"),
+                            ("%m/%d/%y", "MM/DD/YY"),
+                            ("%Y/%m/%d", "YYYY/MM/DD"),
+                            ("%b %d, %Y", "Mon DD, YYYY"),
+                            ("%d %b %Y", "DD Mon YYYY"),
+                            ("%d %b %y", "DD Mon YY"),
+                            ("%B %d, %Y", "Month DD, YYYY"),
+                            ("%d %B %Y", "DD Month YYYY"),
+                            ("%m-%d-%Y", "MM-DD-YYYY"),
+                            ("%d-%m-%Y", "DD-MM-YYYY"),
+                        ] {
+                            option value=(*fmt) selected[*fmt == analysis.detected.date_format] { (*label) }
                         }
                     }
 
