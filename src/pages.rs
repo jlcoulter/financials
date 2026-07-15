@@ -1077,17 +1077,42 @@ pub async fn insights_chart(
         .render(&trend_chart)
         .unwrap_or_else(|_| "<p>Trend chart rendering failed</p>".to_string());
 
-    // Chart B: Cash Flow (grouped bar — positive = income, negative = expenses)
-    // Compute per-date totals for inflows vs outflows
+    // Chart B: Cash Flow (grouped bar — month-over-month change)
+    // Compute per-date DELTAS (not cumulative values)
+    // For each date, delta = value_at_date - value_at_previous_date
+    // Positive delta = income, negative delta = expense
     let mut inflow: Vec<f64> = vec![0.0; dates.len()];
     let mut outflow: Vec<f64> = vec![0.0; dates.len()];
     for (i, name) in item_names.iter().enumerate() {
         let item = items.iter().find(|it| &it.name == name).unwrap();
+        let mut prev: f64 = 0.0;
+        // First non-zero entry is the baseline; don't count it as income/expense
+        let mut started = false;
         for (j, &val) in values[i].iter().enumerate() {
-            if item.item_type == "debt" {
-                outflow[j] += val.abs();
-            } else {
-                inflow[j] += val;
+            if val != 0.0 && !started {
+                // First non-zero entry: set baseline but don't count it as income/expense
+                prev = val;
+                started = true;
+                continue;
+            }
+            if started {
+                let delta = val - prev;
+                if delta > 0.0 {
+                    if item.item_type == "debt" {
+                        // Decreasing debt = good, treat as income
+                        inflow[j] += delta;
+                    } else {
+                        inflow[j] += delta;
+                    }
+                } else if delta < 0.0 {
+                    if item.item_type == "debt" {
+                        // Increasing debt = expense
+                        outflow[j] += delta.abs();
+                    } else {
+                        outflow[j] += delta.abs();
+                    }
+                }
+                prev = val;
             }
         }
     }
