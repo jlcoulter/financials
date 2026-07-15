@@ -1481,7 +1481,9 @@ pub async fn add_outgoing(
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let date = NaiveDate::parse_from_str(&form.date, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
-    let cents = utils::parse_dollars(&form.amount).map_err(AppError::BadRequest)?.abs();
+    let cents = utils::parse_dollars(&form.amount)
+        .map_err(AppError::BadRequest)?
+        .abs();
     let vendor = form
         .vendor
         .map(|v| v.trim().to_string())
@@ -1502,7 +1504,9 @@ pub async fn add_reconciled(
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let date = NaiveDate::parse_from_str(&form.date, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest("Invalid date format. Use YYYY-MM-DD.".into()))?;
-    let cents = utils::parse_dollars(&form.amount).map_err(AppError::BadRequest)?.abs();
+    let cents = utils::parse_dollars(&form.amount)
+        .map_err(AppError::BadRequest)?
+        .abs();
     let vendor = form
         .vendor
         .map(|v| v.trim().to_string())
