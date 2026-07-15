@@ -324,7 +324,7 @@ pub async fn portfolio(
                                        hx-get=(format!("/portfolio/{}/date?date={}", portfolio_id, row.date))
                                        hx-target=(format!("#date-{}", row.date))
                                        hx-swap="outerHTML" {
-                                        (row.date)
+                                        (utils::format_date(row.date))
                                     }
                                     @for (idx, val) in row.values.iter().enumerate() {
                                         @let item_id = items[idx].item_id;
@@ -423,7 +423,7 @@ pub async fn add_balance(
                hx-get=(format!("/portfolio/{}/date?date={}", portfolio_id, log_date))
                hx-target=(format!("#date-{}", log_date))
                hx-swap="outerHTML" {
-                (log_date)
+                (utils::format_date(log_date))
             }
             @for (idx, val) in values.iter().enumerate() {
                 @let item_id = items[idx].item_id;
@@ -1404,7 +1404,7 @@ pub async fn reconcile_detail(
                             @let row_span = linked_ids.len().max(1);
                             div class="reconcile-txn reconcile-txn--matched" style=(format!("grid-row: span {}", row_span)) {
                                 div class="txn-row" {
-                                    span class="txn-date" { (o.date) }
+                                    span class="txn-date" { (utils::format_date(o.date)) }
                                     @if !o.vendor.is_empty() {
                                         span class="txn-vendor" { (o.vendor) }
                                     }
@@ -1437,7 +1437,7 @@ pub async fn reconcile_detail(
                                 @if let Some(r) = reconciled.iter().find(|x| x.txn_id == *rid) {
                                     div class="reconcile-txn reconcile-txn--matched" {
                                         div class="txn-row" {
-                                            span class="txn-date" { (r.date) }
+                                            span class="txn-date" { (utils::format_date(r.date)) }
                                             @if !r.vendor.is_empty() {
                                                 span class="txn-vendor" { (r.vendor) }
                                             }
@@ -1459,7 +1459,7 @@ pub async fn reconcile_detail(
                     @if let Some(o) = unmatched_outgoing.get(i) {
                         div class="reconcile-txn reconcile-txn--unmatched" {
                             div class="txn-row" {
-                                span class="txn-date" { (o.date) }
+                                span class="txn-date" { (utils::format_date(o.date)) }
                                 @if !o.vendor.is_empty() {
                                     span class="txn-vendor" { (o.vendor) }
                                 }
@@ -1477,7 +1477,7 @@ pub async fn reconcile_detail(
                         div class="reconcile-txn reconcile-txn--unmatched" {
                             div class="txn-row" {
                                 input type="checkbox" name="reconciled_ids" value=(r.txn_id) form="reconcile-match-form" class="txn-card-checkbox" {}
-                                span class="txn-date" { (r.date) }
+                                span class="txn-date" { (utils::format_date(r.date)) }
                                 @if !r.vendor.is_empty() {
                                     span class="txn-vendor" { (r.vendor) }
                                 }
@@ -1721,7 +1721,7 @@ async fn render_proposals_page(
                             @let row_span = p.reconciled_ids.len().max(1);
                             div class="reconcile-txn reconcile-txn--proposed" style=(format!("grid-row: span {}", row_span)) {
                                 div class="txn-row" {
-                                    span class="txn-date" { (o.date) }
+                                    span class="txn-date" { (utils::format_date(o.date)) }
                                     @if !o.vendor.is_empty() {
                                         span class="txn-vendor" { (o.vendor) }
                                     }
@@ -1749,7 +1749,7 @@ async fn render_proposals_page(
                                 @if let Some(r) = reconciled.iter().find(|x| x.txn_id == *rid) {
                                     div class="reconcile-txn reconcile-txn--proposed" {
                                         div class="txn-row" {
-                                            span class="txn-date" { (r.date) }
+                                            span class="txn-date" { (utils::format_date(r.date)) }
                                             @if !r.vendor.is_empty() {
                                                 span class="txn-vendor" { (r.vendor) }
                                             }

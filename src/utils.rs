@@ -1,3 +1,9 @@
+use chrono::NaiveDate;
+
+pub fn format_date(date: NaiveDate) -> String {
+    date.format("%d/%m/%Y").to_string()
+}
+
 pub fn parse_dollars(s: &str) -> Result<i64, String> {
     let s = s.trim();
     if s.is_empty() {
