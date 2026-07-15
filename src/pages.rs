@@ -965,10 +965,17 @@ pub async fn insights(
     ))
 }
 
+#[derive(Deserialize)]
+pub struct DateRange {
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
 pub async fn insights_chart(
     State(state): State<AppState>,
     user: LoggedInUser,
     Path(portfolio_id): Path<Uuid>,
+    Query(range): Query<DateRange>,
 ) -> Result<maud::Markup, AppError> {
     let portfolios = portfolio::list_portfolios(&state.db().await, user.0).await?;
     let portfolio_name = portfolios
@@ -1010,6 +1017,42 @@ pub async fn insights_chart(
 
         item_names.push(item.name.clone());
         values.push(row);
+    }
+
+    // Apply date range filter if provided
+    let from_date = range
+        .from
+        .as_deref()
+        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+    let to_date = range
+        .to
+        .as_deref()
+        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+
+    if from_date.is_some() || to_date.is_some() {
+        // Find indices of dates within the range
+        let keep: Vec<usize> = dates
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| {
+                let Ok(parsed) = NaiveDate::parse_from_str(d, "%Y-%m-%d") else {
+                    return false;
+                };
+                let after_from = from_date.map_or(true, |f| parsed >= f);
+                let before_to = to_date.map_or(true, |t| parsed <= t);
+                after_from && before_to
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        let filtered_dates: Vec<String> = keep.iter().map(|&i| dates[i].clone()).collect();
+        let filtered_values: Vec<Vec<f64>> = values
+            .iter()
+            .map(|row| keep.iter().map(|&i| row[i]).collect())
+            .collect();
+
+        dates = filtered_dates;
+        values = filtered_values;
     }
 
     // Build portfolio selector links
@@ -1228,6 +1271,16 @@ pub async fn insights_chart(
                     (link)
                 }
             }
+            form method="get" action=(format!("/insights/{}", portfolio_id)) style="display:flex; gap:12px; align-items:center; margin:16px 0; padding:12px; background:var(--surface, #1e293b); border-radius:8px; border:1px solid var(--border, #334155);" {
+                label style="color:var(--muted, #94a3b8); font-size:0.875rem;" { "From" }
+                input type="date" name="from" value=(range.from.as_deref().unwrap_or("")) style="background:var(--bg, #0f172a); color:var(--text, #e2e8f0); border:1px solid var(--border, #334155); border-radius:4px; padding:4px 8px; font-size:0.875rem;" {}
+                label style="color:var(--muted, #94a3b8); font-size:0.875rem;" { "To" }
+                input type="date" name="to" value=(range.to.as_deref().unwrap_or("")) style="background:var(--bg, #0f172a); color:var(--text, #e2e8f0); border:1px solid var(--border, #334155); border-radius:4px; padding:4px 8px; font-size:0.875rem;" {}
+                button type="submit" style="background:var(--accent, #3b82f6); color:#fff; border:none; border-radius:4px; padding:6px 16px; cursor:pointer; font-size:0.875rem;" { "Apply" }
+                @if range.from.is_some() || range.to.is_some() {
+                    a href=(format!("/insights/{}", portfolio_id)) style="color:var(--muted, #94a3b8); font-size:0.875rem; text-decoration:none; margin-left:8px;" { "Clear" }
+                }
+            }
             div class="insights-chart-section" {
                 (maud::PreEscaped(trend_html))
             }
@@ -1401,6 +1454,8 @@ pub async fn reconcile_detail(
                             input type="file" name="csv_file" accept=".csv" {}
                         }
                         button type="submit" { "Upload Outgoing" }
+                        " "
+                        a href=(format!("/reconcile/{}/outgoing/csv", session_id)) class="btn btn-ghost btn-sm" { "Re-import" }
                     }
                     form method="post" action=(format!("/reconcile/{}/reconciled/csv", session_id))
                           enctype="multipart/form-data"
@@ -1409,6 +1464,8 @@ pub async fn reconcile_detail(
                             input type="file" name="csv_file" accept=".csv" {}
                         }
                         button type="submit" { "Upload Reconciled" }
+                        " "
+                        a href=(format!("/reconcile/{}/reconciled/csv", session_id)) class="btn btn-ghost btn-sm" { "Re-import" }
                     }
                 }
                 @if !unmatched_outgoing.is_empty() || !unmatched_reconciled.is_empty() {
