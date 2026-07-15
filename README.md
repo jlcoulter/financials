@@ -36,9 +36,9 @@ src/
   models/
     user.rs      user DB queries
     portfolio.rs portfolio + wealth item queries + CSV import
-    reconcile.rs reconciliation DB queries + auto-match
+    reconcile.rs reconciliation DB queries, exact-match only
     csv_import.rs CSV column detection + parsing
-  utils.rs       parse_dollars, format_cents
+  utils.rs       parse_dollars, format_cents, format_date
   static/
     style.css
     htmx.min.js
@@ -46,12 +46,18 @@ migrations/
   0001_init.sql              users table
   0002_financials.sql        portfolios, wealth_items, balance_logs
   0004_reconcile.sql         reconcile sessions + transactions
+  0011_add_ignored_column.sql ignored flag on outgoing/reconciled
 ```
 
 ## Running
 
 ```bash
+# Nix users — sets up libiconv, sqlite, apple-sdk etc.
+nix develop -c cargo run
+
+# Without Nix (macOS needs libiconv on PATH)
 cargo run
+
 # with debug logging
 RUST_LOG=rust_web=debug cargo run
 ```
