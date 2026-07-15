@@ -1023,7 +1023,8 @@ pub async fn insights_chart(
         .legend(
             Legend::new()
                 .data(item_names.clone())
-                .text_style(white_text.clone()),
+                .text_style(white_text.clone())
+                .top("30"),
         )
         .x_axis(
             Axis::new()
@@ -1079,7 +1080,8 @@ pub async fn insights_chart(
         .legend(
             Legend::new()
                 .data(vec!["Income".to_string(), "Expenses".to_string()])
-                .text_style(white_text.clone()),
+                .text_style(white_text.clone())
+                .top("30"),
         )
         .x_axis(
             Axis::new()
