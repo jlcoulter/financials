@@ -128,7 +128,7 @@ pub async fn list_outgoing(
     session_id: Uuid,
 ) -> Result<Vec<OutgoingTxn>, AppError> {
     let rows = sqlx::query_as::<_, (String, String, String, i64, String, bool)>(
-        "SELECT txn_id, session_id, date, amount, vendor, matched FROM outgoing_txns WHERE session_id = ? AND deleted_at IS NULL ORDER BY date, created_at",
+        "SELECT txn_id, session_id, date, amount, vendor, matched FROM outgoing_txns WHERE session_id = ? AND deleted_at IS NULL ORDER BY amount DESC, date, created_at",
     )
     .bind(session_id.to_string())
     .fetch_all(pool)
@@ -204,7 +204,7 @@ pub async fn list_reconciled(
     session_id: Uuid,
 ) -> Result<Vec<ReconciledTxn>, AppError> {
     let rows = sqlx::query_as::<_, (String, String, String, i64, String, bool)>(
-        "SELECT txn_id, session_id, date, amount, vendor, matched FROM reconciled_txns WHERE session_id = ? AND deleted_at IS NULL ORDER BY date, created_at",
+        "SELECT txn_id, session_id, date, amount, vendor, matched FROM reconciled_txns WHERE session_id = ? AND deleted_at IS NULL ORDER BY amount DESC, date, created_at",
     )
     .bind(session_id.to_string())
     .fetch_all(pool)
