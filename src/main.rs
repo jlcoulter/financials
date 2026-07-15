@@ -311,6 +311,14 @@ fn app(state: AppState, static_dir: String) -> Router {
             axum::routing::post(pages::auto_match),
         )
         .route(
+            "/reconcile/{id}/ignore-outgoing/{txn_id}",
+            axum::routing::post(pages::ignore_outgoing),
+        )
+        .route(
+            "/reconcile/{id}/ignore-reconciled/{txn_id}",
+            axum::routing::post(pages::ignore_reconciled),
+        )
+        .route(
             "/reconcile/{id}/confirm",
             axum::routing::post(pages::confirm_proposal),
         )

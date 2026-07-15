@@ -1439,6 +1439,9 @@ pub async fn reconcile_detail(
                                 }
                                 span class="txn-amount" { (utils::format_cents(o.amount)) }
                                 button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match" }
+                                form method="post" action=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form" {
+                                    button type="submit" class="btn-ignore" { "Ignore" }
+                                }
                             }
                         }
                     } @else {
@@ -1453,6 +1456,9 @@ pub async fn reconcile_detail(
                                     span class="txn-vendor" { (r.vendor) }
                                 }
                                 span class="txn-amount" { (utils::format_cents(r.amount)) }
+                                form method="post" action=(format!("/reconcile/{}/ignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form" {
+                                    button type="submit" class="btn-ignore" { "Ignore" }
+                                }
                             }
                         }
                     } @else {
@@ -1602,7 +1608,33 @@ pub async fn unlink_reconciled_txns(
         reconcile::unlink_transaction(&state.db().await, m.match_id).await?;
     }
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}",
+        "/reconcile/{}#reconcile-top",
+        session_id
+    )))
+}
+
+pub async fn ignore_outgoing(
+    Path((session_id, txn_id)): Path<(Uuid, Uuid)>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    reconcile::ignore_outgoing(&state.db().await, txn_id).await?;
+    Ok(axum::response::Redirect::to(&format!(
+        "/reconcile/{}#reconcile-top",
+        session_id
+    )))
+}
+
+pub async fn ignore_reconciled(
+    Path((session_id, txn_id)): Path<(Uuid, Uuid)>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    reconcile::ignore_reconciled(&state.db().await, txn_id).await?;
+    Ok(axum::response::Redirect::to(&format!(
+        "/reconcile/{}#reconcile-top",
         session_id
     )))
 }
