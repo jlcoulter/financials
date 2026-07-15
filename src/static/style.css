@@ -729,6 +729,19 @@ th.th--debt {
 }
 
 /* Reconcile */
+.reconcile-summary {
+    display: flex;
+    gap: 1.5rem;
+    margin-top: 0.75rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+
+.reconcile-overs {
+    color: #ef4444;
+    font-weight: 600;
+}
+
 .reconcile-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
