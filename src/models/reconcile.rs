@@ -3,6 +3,52 @@ use chrono::NaiveDate;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
+// ── CSV Uploads ──
+
+pub async fn save_csv_upload(
+    pool: &SqlitePool,
+    id: Uuid,
+    session_id: Uuid,
+    kind: &str,
+    raw_text: &str,
+) -> Result<(), AppError> {
+    sqlx::query("INSERT INTO csv_uploads (id, session_id, kind, raw_text) VALUES (?, ?, ?, ?)")
+        .bind(id.to_string())
+        .bind(session_id.to_string())
+        .bind(kind)
+        .bind(raw_text)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn get_csv_upload(
+    pool: &SqlitePool,
+    id: Uuid,
+) -> Result<(Uuid, Uuid, String, String), AppError> {
+    let row = sqlx::query_as::<_, (String, String, String, String)>(
+        "SELECT id, session_id, kind, raw_text FROM csv_uploads WHERE id = ?",
+    )
+    .bind(id.to_string())
+    .fetch_one(pool)
+    .await
+    .map_err(|_| AppError::BadRequest("CSV upload not found".into()))?;
+    Ok((
+        Uuid::parse_str(&row.0).map_err(|_| AppError::BadRequest("Invalid UUID".into()))?,
+        Uuid::parse_str(&row.1).map_err(|_| AppError::BadRequest("Invalid UUID".into()))?,
+        row.2,
+        row.3,
+    ))
+}
+
+pub async fn delete_csv_upload(pool: &SqlitePool, id: Uuid) -> Result<(), AppError> {
+    sqlx::query("DELETE FROM csv_uploads WHERE id = ?")
+        .bind(id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 // ── Structs ──
 
 #[allow(dead_code)]

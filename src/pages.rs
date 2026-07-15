@@ -2047,11 +2047,9 @@ async fn upload_csv(
                 .map_err(|_| AppError::BadRequest("CSV must be UTF-8".into()))?;
             let analysis = csv_import::analyze_csv(&raw)?;
 
-            // Save CSV to temp file for confirm step
-            let tmp_id = uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-            let tmp_path = format!("/tmp/financials_csv_{}_{}.csv", session_id, tmp_id);
-            std::fs::write(&tmp_path, &raw)
-                .map_err(|e| AppError::BadRequest(format!("Failed to save CSV: {}", e)))?;
+            // Save CSV to database for confirm step
+            let csv_id = uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+            reconcile::save_csv_upload(&state.db().await, csv_id, session_id, kind, &raw).await?;
 
             let num_cols = analysis.preview_rows.first().map(|r| r.len()).unwrap_or(0);
             let col_options: Vec<String> =
@@ -2100,7 +2098,7 @@ async fn upload_csv(
                     }
 
                     form method="post" action=(format!("/reconcile/{}/{}-csv/confirm", session_id, kind)) {
-                        input type="hidden" name="tmp_id" value=(tmp_id) {}
+                        input type="hidden" name="csv_id" value=(csv_id) {}
 
                         div class="csv-mapping" {
                             h3 { "Column Mapping" }
@@ -2188,7 +2186,7 @@ async fn confirm_csv_import(
 ) -> Result<axum::response::Redirect, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
-    let mut tmp_id = String::new();
+    let mut csv_id = String::new();
     let mut date_col: Option<usize> = None;
     let mut amount_col: Option<usize> = None;
     let mut vendor_col: Option<usize> = None;
@@ -2199,7 +2197,7 @@ async fn confirm_csv_import(
             let key = key.to_string();
             let val = urldecode(val);
             match key.as_str() {
-                "tmp_id" => tmp_id = val,
+                "csv_id" => csv_id = val,
                 "date_col" => date_col = val.parse().ok(),
                 "amount_col" => amount_col = val.parse().ok(),
                 "vendor_col" => {
@@ -2219,10 +2217,11 @@ async fn confirm_csv_import(
         date_format = "%Y-%m-%d".to_string();
     }
 
-    let tmp_path = format!("/tmp/financials_csv_{}_{}.csv", session_id, tmp_id);
-    let raw = std::fs::read_to_string(&tmp_path)
-        .map_err(|e| AppError::BadRequest(format!("CSV file not found: {}", e)))?;
-    let _ = std::fs::remove_file(&tmp_path); // Clean up
+    let csv_uuid =
+        Uuid::parse_str(&csv_id).map_err(|_| AppError::BadRequest("Invalid CSV ID".into()))?;
+    let (_, _, _, raw) = reconcile::get_csv_upload(&state.db().await, csv_uuid).await?;
+    // Clean up after reading
+    let _ = reconcile::delete_csv_upload(&state.db().await, csv_uuid).await;
 
     let mapping = csv_import::ColumnMapping {
         date_col,
