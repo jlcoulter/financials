@@ -411,12 +411,20 @@ pub async fn auto_match(
     let outgoing = list_outgoing(pool, session_id).await?;
     let reconciled = list_reconciled(pool, session_id).await?;
 
-    // Sort unmatched outgoing by amount descending so larger values get matched first
-    let mut unmatched_outgoing: Vec<&OutgoingTxn> = outgoing
+    Ok(match_exact(&outgoing, &reconciled, skip_ids))
+}
+
+/// Propose exact 1:1 matches — one outgoing to one reconciled with the same amount.
+/// Does not combine multiple reconciled items to match one outgoing.
+fn match_exact(
+    outgoing: &[OutgoingTxn],
+    reconciled: &[ReconciledTxn],
+    skip_ids: &[Uuid],
+) -> Vec<Proposal> {
+    let unmatched_outgoing: Vec<&OutgoingTxn> = outgoing
         .iter()
         .filter(|o| !o.matched && !skip_ids.contains(&o.txn_id))
         .collect();
-    unmatched_outgoing.sort_by_key(|b| std::cmp::Reverse(b.amount));
     let unmatched_reconciled: Vec<&ReconciledTxn> =
         reconciled.iter().filter(|r| !r.matched).collect();
 
@@ -424,7 +432,6 @@ pub async fn auto_match(
     let mut used: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
 
     for o in &unmatched_outgoing {
-        // Try exact single match first
         if let Some(r) = unmatched_reconciled
             .iter()
             .find(|r| !used.contains(&r.txn_id) && r.amount == o.amount)
@@ -434,62 +441,10 @@ pub async fn auto_match(
                 reconciled_ids: vec![r.txn_id],
             });
             used.insert(r.txn_id);
-            continue;
-        }
-
-        // Try sum match with up to 4 reconciled transactions
-        let available: Vec<&ReconciledTxn> = unmatched_reconciled
-            .iter()
-            .filter(|r| !used.contains(&r.txn_id))
-            .copied()
-            .collect();
-
-        if let Some(combo) = find_subset_sum(&available, o.amount, 4) {
-            for r_id in &combo {
-                used.insert(*r_id);
-            }
-            proposals.push(Proposal {
-                outgoing_id: o.txn_id,
-                reconciled_ids: combo,
-            });
         }
     }
 
-    Ok(proposals)
-}
-
-/// Find a subset of up to `max_len` items whose amounts sum to `target`.
-/// Returns the txn_ids of the matching subset, or None.
-fn find_subset_sum(items: &[&ReconciledTxn], target: i64, max_len: usize) -> Option<Vec<Uuid>> {
-    // Brute force for small max_len
-    for len in 2..=max_len {
-        if len > items.len() {
-            break;
-        }
-        if let Some(combo) = subset_sum_of_size(items, target, len) {
-            return Some(combo);
-        }
-    }
-    None
-}
-
-fn subset_sum_of_size(items: &[&ReconciledTxn], target: i64, size: usize) -> Option<Vec<Uuid>> {
-    if size == 0 {
-        return if target == 0 { Some(vec![]) } else { None };
-    }
-    if items.len() < size {
-        return None;
-    }
-
-    // Take first item or skip it
-    let first = items[0];
-    // Try including first
-    if let Some(mut combo) = subset_sum_of_size(&items[1..], target - first.amount, size - 1) {
-        combo.push(first.txn_id);
-        return Some(combo);
-    }
-    // Try skipping first
-    subset_sum_of_size(&items[1..], target, size)
+    proposals
 }
 
 #[cfg(test)]
@@ -509,75 +464,73 @@ mod tests {
         }
     }
 
-    // ── find_subset_sum ──
-
-    #[test]
-    fn find_subset_sum_exact_single_match() {
-        // Single item matching target — not found (starts at len=2)
-        let t1 = txn("00000000-0000-0000-0000-000000000001", 100);
-        let items = [&t1];
-        assert_eq!(find_subset_sum(&items, 100, 4), None);
+    fn out(id: &str, amount: i64) -> OutgoingTxn {
+        OutgoingTxn {
+            txn_id: Uuid::parse_str(id).unwrap(),
+            session_id: Uuid::nil(),
+            date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+            amount,
+            vendor: "test".to_string(),
+            matched: false,
+            ignored: false,
+        }
     }
 
     #[test]
-    fn find_subset_sum_two_item_match() {
-        let t1 = txn("00000000-0000-0000-0000-000000000001", 60);
-        let t2 = txn("00000000-0000-0000-0000-000000000002", 40);
-        let items = [&t1, &t2];
-        let result = find_subset_sum(&items, 100, 4);
-        assert!(result.is_some());
-        let ids = result.unwrap();
-        assert_eq!(ids.len(), 2);
+    fn match_exact_single() {
+        let o1 = out("00000000-0000-0000-0000-000000000010", 100_00);
+        let r1 = txn("00000000-0000-0000-0000-000000000001", 100_00);
+        let o1_id = o1.txn_id;
+        let r1_id = r1.txn_id;
+        let result = match_exact(&[o1], &[r1], &[]);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].outgoing_id, o1_id);
+        assert_eq!(result[0].reconciled_ids, vec![r1_id]);
     }
 
     #[test]
-    fn find_subset_sum_three_item_match() {
-        let t1 = txn("00000000-0000-0000-0000-000000000001", 50);
-        let t2 = txn("00000000-0000-0000-0000-000000000002", 30);
-        let t3 = txn("00000000-0000-0000-0000-000000000003", 20);
-        let items = [&t1, &t2, &t3];
-        let result = find_subset_sum(&items, 100, 4);
-        assert!(result.is_some());
+    fn match_exact_no_combination() {
+        // Should NOT combine multiple reconciled items to match one outgoing
+        let o1 = out("00000000-0000-0000-0000-000000000010", 100_00);
+        let r1 = txn("00000000-0000-0000-0000-000000000001", 60_00);
+        let r2 = txn("00000000-0000-0000-0000-000000000002", 40_00);
+        let result = match_exact(&[o1], &[r1, r2], &[]);
+        assert_eq!(result.len(), 0, "should not combine items to match");
     }
 
     #[test]
-    fn find_subset_sum_no_match() {
-        let t1 = txn("00000000-0000-0000-0000-000000000001", 10);
-        let t2 = txn("00000000-0000-0000-0000-000000000002", 20);
-        let items = [&t1, &t2];
-        assert_eq!(find_subset_sum(&items, 100, 4), None);
+    fn match_exact_multiple_same_amount() {
+        let o1 = out("00000000-0000-0000-0000-000000000010", 100_00);
+        let o2 = out("00000000-0000-0000-0000-000000000011", 100_00);
+        let r1 = txn("00000000-0000-0000-0000-000000000001", 100_00);
+        let r2 = txn("00000000-0000-0000-0000-000000000002", 100_00);
+        let result = match_exact(&[o1, o2], &[r1, r2], &[]);
+        assert_eq!(result.len(), 2);
     }
 
     #[test]
-    fn find_subset_sum_empty_items() {
-        let items: Vec<&ReconciledTxn> = vec![];
-        assert_eq!(find_subset_sum(&items, 50, 4), None);
+    fn match_exact_no_match_different_amount() {
+        let o1 = out("00000000-0000-0000-0000-000000000010", 50_00);
+        let r1 = txn("00000000-0000-0000-0000-000000000001", 100_00);
+        let result = match_exact(&[o1], &[r1], &[]);
+        assert_eq!(result.len(), 0);
     }
 
     #[test]
-    fn find_subset_sum_respects_max_len() {
-        // 5 items that sum to 100, but max_len=3 so no match
-        let t1 = txn("00000000-0000-0000-0000-000000000001", 20);
-        let t2 = txn("00000000-0000-0000-0000-000000000002", 20);
-        let t3 = txn("00000000-0000-0000-0000-000000000003", 20);
-        let t4 = txn("00000000-0000-0000-0000-000000000004", 20);
-        let t5 = txn("00000000-0000-0000-0000-000000000005", 20);
-        let items = [&t1, &t2, &t3, &t4, &t5];
-        assert_eq!(find_subset_sum(&items, 100, 3), None);
-    }
-
-    // ── subset_sum_of_size ──
-
-    #[test]
-    fn subset_sum_size_zero_target_zero() {
-        let items: Vec<&ReconciledTxn> = vec![];
-        let result = subset_sum_of_size(&items, 0, 0);
-        assert_eq!(result, Some(vec![]));
+    fn match_exact_skips_matched() {
+        let o1 = out("00000000-0000-0000-0000-000000000010", 100_00);
+        let mut r1 = txn("00000000-0000-0000-0000-000000000001", 100_00);
+        r1.matched = true;
+        let result = match_exact(&[o1], &[r1], &[]);
+        assert_eq!(result.len(), 0, "should skip already-matched items");
     }
 
     #[test]
-    fn subset_sum_size_zero_target_nonzero() {
-        let items: Vec<&ReconciledTxn> = vec![];
-        assert_eq!(subset_sum_of_size(&items, 100, 0), None);
+    fn match_exact_skip_ids() {
+        let o1 = out("00000000-0000-0000-0000-000000000010", 100_00);
+        let skip = o1.txn_id;
+        let r1 = txn("00000000-0000-0000-0000-000000000001", 100_00);
+        let result = match_exact(&[o1], &[r1], &[skip]);
+        assert_eq!(result.len(), 0, "should skip outgoing in skip_ids");
     }
 }
