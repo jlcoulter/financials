@@ -416,6 +416,7 @@ pub async fn add_balance(
         })
         .sum();
 
+    // Return the new data row, plus OOB swap to reset the blank input row
     Ok(maud::html! {
         tr id=(format!("row-{}", log_date)) {
             td id=(format!("date-{}", log_date)) class="editable date-cell" tabindex="0"
@@ -449,6 +450,29 @@ pub async fn add_balance(
                 }
             }
             td class="row-total" { (utils::format_cents(total)) }
+        }
+        // OOB swap: replace the blank row with a fresh one (clears inputs)
+        tr id="blank-row" class="blank-row" hx-swap-oob="true" {
+            td {
+                input type="date" name="log_date"
+                       form="balance-add-form" required {}
+            }
+            @for item in &items {
+                td {
+                    input type="number" step="0.01"
+                           name=(format!("balance_{}", item.item_id))
+                           form="balance-add-form"
+                           placeholder="$0.00" {}
+                }
+            }
+            td class="row-total" {
+                form id="balance-add-form"
+                    hx-post=(format!("/portfolio/{}/balances", portfolio_id))
+                    hx-target="#blank-row"
+                    hx-swap="afterend" {
+                    button type="submit" class="btn btn-primary btn-xs" { "+ Add" }
+                }
+            }
         }
     })
 }
