@@ -1309,7 +1309,7 @@ pub async fn reconcile_detail(
             form id="reconcile-match-form" method="post" action=(format!("/reconcile/{}/link", session_id)) {}
 
             // ── Toolbar ──
-            div class="reconcile-toolbar" {
+            div id="reconcile-top" class="reconcile-toolbar" {
                 details class="add-item-details" {
                     summary { "+ Add Outgoing" }
                     form method="post" action=(format!("/reconcile/{}/outgoing", session_id)) class="add-item-form reconcile-add-form" {
@@ -1488,7 +1488,7 @@ pub async fn add_outgoing(
         .unwrap_or_default();
     reconcile::add_outgoing(&state.db().await, session_id, date, cents, &vendor).await?;
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}",
+        "/reconcile/{}#reconcile-top",
         session_id
     )))
 }
@@ -1509,7 +1509,7 @@ pub async fn add_reconciled(
         .unwrap_or_default();
     reconcile::add_reconciled(&state.db().await, session_id, date, cents, &vendor).await?;
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}",
+        "/reconcile/{}#reconcile-top",
         session_id
     )))
 }
@@ -1553,7 +1553,7 @@ pub async fn link_txns(
         reconcile::link_transactions(&state.db().await, outgoing_id, reconciled_id).await?;
     }
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}",
+        "/reconcile/{}#reconcile-top",
         session_id
     )))
 }
@@ -1578,7 +1578,7 @@ pub async fn unlink_txns(
         reconcile::unlink_transaction(&state.db().await, m.match_id).await?;
     }
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}",
+        "/reconcile/{}#reconcile-top",
         session_id
     )))
 }
@@ -1602,7 +1602,7 @@ pub async fn unlink_reconciled_txns(
         reconcile::unlink_transaction(&state.db().await, m.match_id).await?;
     }
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}",
+        "/reconcile/{}#reconcile-top",
         session_id
     )))
 }
@@ -1782,7 +1782,7 @@ pub async fn confirm_all_proposals(
         }
     }
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}",
+        "/reconcile/{}#reconcile-top",
         session_id
     )))
 }
@@ -1838,7 +1838,7 @@ pub async fn rename_session(
         .execute(&state.db().await)
         .await?;
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}",
+        "/reconcile/{}#reconcile-top",
         session_id
     )))
 }
@@ -2062,7 +2062,7 @@ async fn confirm_csv_import(
     }
 
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}",
+        "/reconcile/{}#reconcile-top",
         session_id
     )))
 }
