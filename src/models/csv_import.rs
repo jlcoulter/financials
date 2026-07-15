@@ -262,7 +262,7 @@ pub fn parse_csv_with_mapping(
             continue; // skip rows with no amount
         }
         let cents = match crate::utils::parse_dollars(amount_str) {
-            Ok(c) => c,
+            Ok(c) => c.abs(),
             Err(_) => continue, // skip rows with unparseable amounts
         };
 
@@ -470,7 +470,7 @@ mod tests {
             date_format: "%d/%m/%Y".to_string(),
         };
         let rows = parse_csv_with_mapping(csv, &mapping).unwrap();
-        assert_eq!(rows[0].1, -15000000);
+        assert_eq!(rows[0].1, 15000000);
     }
 
     #[test]
