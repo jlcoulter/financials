@@ -9,12 +9,13 @@ pub fn layout(title: &str, content: maud::Markup, username: Option<&LoggedInUser
                 script {
                     (maud::PreEscaped("document.addEventListener('htmx:beforeSwap', function(e) { if(e.detail.xhr.status >= 400) e.detail.shouldSwap = true; });"))
                 }
-                link rel="stylesheet" href="/static/style.css"{}
+                link rel="stylesheet" href="/static/style.css";
             }
             body {
                 header {
-                    @if let Some(name) = username {
-                        span { "Hello " (name.0) }
+                    @if let Some(_name) = username {
+                        a href="/dashboard" class="header-link" { "Dashboard" }
+                        span { "Hello!"  }
                         form action = "/logout"
                         method = "post" {
                             button type = "submit" class="btn btn-ghost" {"Logout"}
