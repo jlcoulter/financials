@@ -235,16 +235,28 @@ pub fn analyze_csv(raw: &str) -> Result<CsvAnalysis, AppError> {
     })
 }
 
+/// A parsed CSV row with its metadata (unused columns).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CsvRow {
+    pub date: NaiveDate,
+    pub amount: i64,
+    pub vendor: String,
+    /// JSON object of unused columns (keyed by header name or "Column N").
+    pub metadata: std::collections::HashMap<String, String>,
+}
+
 /// Parse CSV with an explicit column mapping.
-pub fn parse_csv_with_mapping(
-    raw: &str,
-    mapping: &ColumnMapping,
-) -> Result<Vec<(NaiveDate, i64, String)>, AppError> {
+pub fn parse_csv_with_mapping(raw: &str, mapping: &ColumnMapping) -> Result<Vec<CsvRow>, AppError> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .from_reader(raw.as_bytes());
 
-    let mut rows: Vec<(NaiveDate, i64, String)> = Vec::new();
+    let headers: Vec<String> = reader
+        .headers()
+        .map(|h| h.iter().map(|s| s.trim().to_string()).collect())
+        .unwrap_or_default();
+
+    let mut rows: Vec<CsvRow> = Vec::new();
 
     for result in reader.records() {
         let record = result.map_err(|e| AppError::BadRequest(format!("CSV parse error: {}", e)))?;
@@ -272,10 +284,39 @@ pub fn parse_csv_with_mapping(
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
 
-        rows.push((date, cents, vendor));
+        // Collect unused columns as metadata
+        let used_cols: std::collections::HashSet<usize> = {
+            let mut set = std::collections::HashSet::new();
+            set.insert(mapping.date_col);
+            set.insert(mapping.amount_col);
+            if let Some(vc) = mapping.vendor_col {
+                set.insert(vc);
+            }
+            set
+        };
+        let mut metadata = std::collections::HashMap::new();
+        for col in 0..record.len() {
+            if !used_cols.contains(&col) {
+                let key = headers
+                    .get(col)
+                    .cloned()
+                    .unwrap_or_else(|| format!("Column {}", col + 1));
+                let val = record.get(col).unwrap_or("").to_string();
+                if !val.is_empty() {
+                    metadata.insert(key, val);
+                }
+            }
+        }
+
+        rows.push(CsvRow {
+            date,
+            amount: cents,
+            vendor,
+            metadata,
+        });
     }
 
-    rows.sort_by_key(|(d, _, _)| *d);
+    rows.sort_by_key(|r| r.date);
     Ok(rows)
 }
 
@@ -441,9 +482,10 @@ mod tests {
         };
         let rows = parse_csv_with_mapping(csv, &mapping).unwrap();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].0, NaiveDate::from_ymd_opt(2025, 7, 1).unwrap());
-        assert_eq!(rows[0].1, 450);
-        assert_eq!(rows[0].2, "Coffee");
+        assert_eq!(rows[0].date, NaiveDate::from_ymd_opt(2025, 7, 1).unwrap());
+        assert_eq!(rows[0].amount, 450);
+        assert_eq!(rows[0].vendor, "Coffee");
+        assert!(rows[0].metadata.is_empty());
     }
 
     #[test]
@@ -457,7 +499,7 @@ mod tests {
         };
         let rows = parse_csv_with_mapping(csv, &mapping).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].2, "Coffee");
+        assert_eq!(rows[0].vendor, "Coffee");
     }
 
     #[test]
@@ -470,7 +512,7 @@ mod tests {
             date_format: "%d/%m/%Y".to_string(),
         };
         let rows = parse_csv_with_mapping(csv, &mapping).unwrap();
-        assert_eq!(rows[0].1, 15000000);
+        assert_eq!(rows[0].amount, 15000000);
     }
 
     #[test]
@@ -483,6 +525,53 @@ mod tests {
             date_format: "%d/%m/%Y".to_string(),
         };
         let rows = parse_csv_with_mapping(csv, &mapping).unwrap();
-        assert_eq!(rows[0].2, "");
+        assert_eq!(rows[0].vendor, "");
+    }
+
+    #[test]
+    fn parse_csv_with_mapping_metadata() {
+        let csv = "Date,Description,Amount,Reference,Category\n01/07/2025,Coffee,4.50,REF001,Food\n02/07/2025,Tea,3.20,REF002,Drinks\n";
+        let mapping = ColumnMapping {
+            date_col: 0,
+            amount_col: 2,
+            vendor_col: Some(1),
+            date_format: "%d/%m/%Y".to_string(),
+        };
+        let rows = parse_csv_with_mapping(csv, &mapping).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0].metadata.get("Reference"),
+            Some(&"REF001".to_string())
+        );
+        assert_eq!(rows[0].metadata.get("Category"), Some(&"Food".to_string()));
+        assert_eq!(
+            rows[1].metadata.get("Reference"),
+            Some(&"REF002".to_string())
+        );
+        assert_eq!(
+            rows[1].metadata.get("Category"),
+            Some(&"Drinks".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_csv_with_mapping_metadata_no_headers() {
+        let csv = "Date,Amount,Description,Reference\n01/07/2025,4.50,Coffee,REF001\n02/07/2025,3.20,Tea,REF002\n";
+        let mapping = ColumnMapping {
+            date_col: 0,
+            amount_col: 1,
+            vendor_col: Some(2),
+            date_format: "%d/%m/%Y".to_string(),
+        };
+        let rows = parse_csv_with_mapping(csv, &mapping).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0].metadata.get("Reference"),
+            Some(&"REF001".to_string())
+        );
+        assert_eq!(
+            rows[1].metadata.get("Reference"),
+            Some(&"REF002".to_string())
+        );
     }
 }
