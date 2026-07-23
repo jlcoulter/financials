@@ -1,6 +1,8 @@
+use rust_web::models::csv_import::CsvRow;
 use rust_web::models::reconcile;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
+use std::collections::HashMap;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -23,6 +25,10 @@ async fn setup_user(pool: &SqlitePool) -> Uuid {
         .await
         .unwrap();
     user_id
+}
+
+fn empty_metadata() -> HashMap<String, String> {
+    HashMap::new()
 }
 
 #[tokio::test]
@@ -101,9 +107,16 @@ async fn add_and_list_outgoing() {
         .unwrap();
     let date = chrono::NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
 
-    let id = reconcile::add_outgoing(&pool, session_id, date, 5000, "Coffee Shop")
-        .await
-        .unwrap();
+    let id = reconcile::add_outgoing(
+        &pool,
+        session_id,
+        date,
+        5000,
+        "Coffee Shop",
+        &empty_metadata(),
+    )
+    .await
+    .unwrap();
 
     let txns = reconcile::list_outgoing(&pool, session_id).await.unwrap();
     assert_eq!(txns.len(), 1);
@@ -124,9 +137,24 @@ async fn bulk_add_outgoing_deduplicates() {
     let date = chrono::NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
 
     let txns = vec![
-        (date, 5000, "Coffee Shop".to_string()),
-        (date, 3000, "Tea House".to_string()),
-        (date, 5000, "Coffee Shop".to_string()), // duplicate
+        CsvRow {
+            date,
+            amount: 5000,
+            vendor: "Coffee Shop".to_string(),
+            metadata: HashMap::new(),
+        },
+        CsvRow {
+            date,
+            amount: 3000,
+            vendor: "Tea House".to_string(),
+            metadata: HashMap::new(),
+        },
+        CsvRow {
+            date,
+            amount: 5000,
+            vendor: "Coffee Shop".to_string(),
+            metadata: HashMap::new(),
+        }, // duplicate
     ];
 
     let count = reconcile::bulk_add_outgoing(&pool, session_id, &txns)
@@ -148,7 +176,7 @@ async fn add_and_list_reconciled() {
         .unwrap();
     let date = chrono::NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
 
-    let id = reconcile::add_reconciled(&pool, session_id, date, 5000, "Bank")
+    let id = reconcile::add_reconciled(&pool, session_id, date, 5000, "Bank", &empty_metadata())
         .await
         .unwrap();
 
@@ -168,8 +196,18 @@ async fn bulk_add_reconciled_deduplicates() {
     let date = chrono::NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
 
     let txns = vec![
-        (date, 5000, "Bank A".to_string()),
-        (date, 5000, "Bank A".to_string()), // duplicate
+        CsvRow {
+            date,
+            amount: 5000,
+            vendor: "Bank A".to_string(),
+            metadata: HashMap::new(),
+        },
+        CsvRow {
+            date,
+            amount: 5000,
+            vendor: "Bank A".to_string(),
+            metadata: HashMap::new(),
+        }, // duplicate
     ];
 
     let count = reconcile::bulk_add_reconciled(&pool, session_id, &txns)
@@ -188,12 +226,14 @@ async fn link_and_unlink_transactions() {
         .unwrap();
     let date = chrono::NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
 
-    let out_id = reconcile::add_outgoing(&pool, session_id, date, 5000, "Coffee")
-        .await
-        .unwrap();
-    let rec_id = reconcile::add_reconciled(&pool, session_id, date, 5000, "Bank")
-        .await
-        .unwrap();
+    let out_id =
+        reconcile::add_outgoing(&pool, session_id, date, 5000, "Coffee", &empty_metadata())
+            .await
+            .unwrap();
+    let rec_id =
+        reconcile::add_reconciled(&pool, session_id, date, 5000, "Bank", &empty_metadata())
+            .await
+            .unwrap();
 
     // Link them
     reconcile::link_transactions(&pool, out_id, rec_id)
@@ -237,12 +277,14 @@ async fn auto_match_exact_amount() {
         .unwrap();
     let date = chrono::NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
 
-    let out_id = reconcile::add_outgoing(&pool, session_id, date, 5000, "Coffee")
-        .await
-        .unwrap();
-    let rec_id = reconcile::add_reconciled(&pool, session_id, date, 5000, "Bank")
-        .await
-        .unwrap();
+    let out_id =
+        reconcile::add_outgoing(&pool, session_id, date, 5000, "Coffee", &empty_metadata())
+            .await
+            .unwrap();
+    let rec_id =
+        reconcile::add_reconciled(&pool, session_id, date, 5000, "Bank", &empty_metadata())
+            .await
+            .unwrap();
 
     let proposals = reconcile::auto_match(&pool, session_id, &[]).await.unwrap();
 
@@ -261,10 +303,10 @@ async fn auto_match_no_match_different_amounts() {
         .unwrap();
     let date = chrono::NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
 
-    reconcile::add_outgoing(&pool, session_id, date, 5000, "Coffee")
+    reconcile::add_outgoing(&pool, session_id, date, 5000, "Coffee", &empty_metadata())
         .await
         .unwrap();
-    reconcile::add_reconciled(&pool, session_id, date, 9999, "Bank")
+    reconcile::add_reconciled(&pool, session_id, date, 9999, "Bank", &empty_metadata())
         .await
         .unwrap();
 
@@ -283,12 +325,14 @@ async fn auto_match_skips_already_matched() {
         .unwrap();
     let date = chrono::NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
 
-    let out_id = reconcile::add_outgoing(&pool, session_id, date, 5000, "Coffee")
-        .await
-        .unwrap();
-    let rec_id = reconcile::add_reconciled(&pool, session_id, date, 5000, "Bank")
-        .await
-        .unwrap();
+    let out_id =
+        reconcile::add_outgoing(&pool, session_id, date, 5000, "Coffee", &empty_metadata())
+            .await
+            .unwrap();
+    let rec_id =
+        reconcile::add_reconciled(&pool, session_id, date, 5000, "Bank", &empty_metadata())
+            .await
+            .unwrap();
 
     // Manually link them first
     reconcile::link_transactions(&pool, out_id, rec_id)
@@ -310,12 +354,14 @@ async fn delete_session_cascades_to_matches() {
         .unwrap();
     let date = chrono::NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
 
-    let out_id = reconcile::add_outgoing(&pool, session_id, date, 5000, "Coffee")
-        .await
-        .unwrap();
-    let rec_id = reconcile::add_reconciled(&pool, session_id, date, 5000, "Bank")
-        .await
-        .unwrap();
+    let out_id =
+        reconcile::add_outgoing(&pool, session_id, date, 5000, "Coffee", &empty_metadata())
+            .await
+            .unwrap();
+    let rec_id =
+        reconcile::add_reconciled(&pool, session_id, date, 5000, "Bank", &empty_metadata())
+            .await
+            .unwrap();
 
     reconcile::link_transactions(&pool, out_id, rec_id)
         .await

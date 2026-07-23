@@ -1444,6 +1444,19 @@ pub async fn reconcile_detail(
                                         button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Unmatch" }
                                     }
                                 }
+                                @if !o.metadata.is_empty() {
+                                    details class="txn-metadata" {
+                                        summary { "Metadata" }
+                                        table {
+                                            @for (key, val) in &o.metadata {
+                                                tr {
+                                                    td class="txn-metadata-key" { (key) }
+                                                    td { (val) }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             @for rid in linked_ids {
                                 @if let Some(r) = reconciled.iter().find(|x| x.txn_id == *rid) {
@@ -1457,6 +1470,19 @@ pub async fn reconcile_detail(
                                             form method="post" action=(format!("/reconcile/{}/unlink-reconciled", session_id)) class="txn-unlink-form" {
                                                 input type="hidden" name="reconciled_id" value=(r.txn_id) {}
                                                 button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Unmatch" }
+                                            }
+                                        }
+                                        @if !r.metadata.is_empty() {
+                                            details class="txn-metadata" {
+                                                summary { "Metadata" }
+                                                table {
+                                                    @for (key, val) in &r.metadata {
+                                                        tr {
+                                                            td class="txn-metadata-key" { (key) }
+                                                            td { (val) }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1481,6 +1507,19 @@ pub async fn reconcile_detail(
                                     button type="submit" class="btn-ignore" { "Ignore" }
                                 }
                             }
+                            @if !o.metadata.is_empty() {
+                                details class="txn-metadata" {
+                                    summary { "Metadata" }
+                                    table {
+                                        @for (key, val) in &o.metadata {
+                                            tr {
+                                                td class="txn-metadata-key" { (key) }
+                                                td { (val) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     } @else {
                         div class="reconcile-grid-spacer" {}
@@ -1496,6 +1535,19 @@ pub async fn reconcile_detail(
                                 span class="txn-amount" { (utils::format_cents(r.amount)) }
                                 form method="post" action=(format!("/reconcile/{}/ignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form" {
                                     button type="submit" class="btn-ignore" { "Ignore" }
+                                }
+                            }
+                            @if !r.metadata.is_empty() {
+                                details class="txn-metadata" {
+                                    summary { "Metadata" }
+                                    table {
+                                        @for (key, val) in &r.metadata {
+                                            tr {
+                                                td class="txn-metadata-key" { (key) }
+                                                td { (val) }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1532,7 +1584,15 @@ pub async fn add_outgoing(
         .vendor
         .map(|v| v.trim().to_string())
         .unwrap_or_default();
-    reconcile::add_outgoing(&state.db().await, session_id, date, cents, &vendor).await?;
+    reconcile::add_outgoing(
+        &state.db().await,
+        session_id,
+        date,
+        cents,
+        &vendor,
+        &std::collections::HashMap::new(),
+    )
+    .await?;
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
         session_id
@@ -1555,7 +1615,15 @@ pub async fn add_reconciled(
         .vendor
         .map(|v| v.trim().to_string())
         .unwrap_or_default();
-    reconcile::add_reconciled(&state.db().await, session_id, date, cents, &vendor).await?;
+    reconcile::add_reconciled(
+        &state.db().await,
+        session_id,
+        date,
+        cents,
+        &vendor,
+        &std::collections::HashMap::new(),
+    )
+    .await?;
     Ok(axum::response::Redirect::to(&format!(
         "/reconcile/{}",
         session_id

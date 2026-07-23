@@ -2120,6 +2120,7 @@ dependencies = [
  "maud",
  "object_store",
  "serde",
+ "serde_json",
  "sqlx",
  "time",
  "tokio",

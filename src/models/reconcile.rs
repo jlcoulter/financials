@@ -1,6 +1,7 @@
 use crate::error::AppError;
 use chrono::NaiveDate;
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 // ── Structs ──
@@ -21,6 +22,7 @@ pub struct OutgoingTxn {
     pub vendor: String,
     pub matched: bool,
     pub ignored: bool,
+    pub metadata: HashMap<String, String>,
 }
 
 #[allow(dead_code)]
@@ -33,6 +35,7 @@ pub struct ReconciledTxn {
     pub vendor: String,
     pub matched: bool,
     pub ignored: bool,
+    pub metadata: HashMap<String, String>,
 }
 
 pub struct MatchLink {
@@ -129,8 +132,8 @@ pub async fn list_outgoing(
     pool: &SqlitePool,
     session_id: Uuid,
 ) -> Result<Vec<OutgoingTxn>, AppError> {
-    let rows = sqlx::query_as::<_, (String, String, String, i64, String, bool, bool)>(
-        "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE) FROM outgoing_txns WHERE session_id = ? AND deleted_at IS NULL AND (ignored IS NULL OR ignored = FALSE) ORDER BY amount DESC, date, created_at",
+    let rows = sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+        "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM outgoing_txns WHERE session_id = ? AND deleted_at IS NULL AND (ignored IS NULL OR ignored = FALSE) ORDER BY amount DESC, date, created_at",
     )
     .bind(session_id.to_string())
     .fetch_all(pool)
@@ -138,7 +141,9 @@ pub async fn list_outgoing(
 
     rows.into_iter()
         .map(
-            |(id_str, sid_str, date_str, amount, vendor, matched, ignored)| {
+            |(id_str, sid_str, date_str, amount, vendor, matched, ignored, metadata_str)| {
+                let metadata: HashMap<String, String> =
+                    serde_json::from_str(&metadata_str).unwrap_or_default();
                 Ok(OutgoingTxn {
                     txn_id: Uuid::parse_str(&id_str)?,
                     session_id: Uuid::parse_str(&sid_str)?,
@@ -147,6 +152,7 @@ pub async fn list_outgoing(
                     vendor,
                     matched,
                     ignored,
+                    metadata,
                 })
             },
         )
@@ -159,16 +165,19 @@ pub async fn add_outgoing(
     date: NaiveDate,
     amount: i64,
     vendor: &str,
+    metadata: &HashMap<String, String>,
 ) -> Result<Uuid, AppError> {
     let id = Uuid::now_v7();
+    let metadata_json = serde_json::to_string(metadata).unwrap_or_else(|_| "{}".to_string());
     sqlx::query(
-        "INSERT INTO outgoing_txns (txn_id, session_id, date, amount, vendor) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO outgoing_txns (txn_id, session_id, date, amount, vendor, metadata) VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(id.to_string())
     .bind(session_id.to_string())
     .bind(date.to_string())
     .bind(amount)
     .bind(vendor)
+    .bind(&metadata_json)
     .execute(pool)
     .await?;
     Ok(id)
@@ -179,23 +188,31 @@ pub async fn add_outgoing(
 pub async fn bulk_add_outgoing(
     pool: &SqlitePool,
     session_id: Uuid,
-    txns: &[(NaiveDate, i64, String)],
+    txns: &[crate::models::csv_import::CsvRow],
 ) -> Result<usize, AppError> {
     let mut count = 0usize;
-    for (date, amount, vendor) in txns {
+    for row in txns {
         // Check for duplicate
         let exists: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM outgoing_txns WHERE session_id = ? AND date = ? AND amount = ? AND vendor = ? AND deleted_at IS NULL)",
         )
         .bind(session_id.to_string())
-        .bind(date.to_string())
-        .bind(*amount)
-        .bind(vendor)
+        .bind(row.date.to_string())
+        .bind(row.amount)
+        .bind(&row.vendor)
         .fetch_one(pool)
         .await?;
 
         if !exists {
-            add_outgoing(pool, session_id, *date, *amount, vendor).await?;
+            add_outgoing(
+                pool,
+                session_id,
+                row.date,
+                row.amount,
+                &row.vendor,
+                &row.metadata,
+            )
+            .await?;
             count += 1;
         }
     }
@@ -208,8 +225,8 @@ pub async fn list_reconciled(
     pool: &SqlitePool,
     session_id: Uuid,
 ) -> Result<Vec<ReconciledTxn>, AppError> {
-    let rows = sqlx::query_as::<_, (String, String, String, i64, String, bool, bool)>(
-        "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE) FROM reconciled_txns WHERE session_id = ? AND deleted_at IS NULL AND (ignored IS NULL OR ignored = FALSE) ORDER BY amount DESC, date, created_at",
+    let rows = sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+        "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM reconciled_txns WHERE session_id = ? AND deleted_at IS NULL AND (ignored IS NULL OR ignored = FALSE) ORDER BY amount DESC, date, created_at",
     )
     .bind(session_id.to_string())
     .fetch_all(pool)
@@ -217,7 +234,9 @@ pub async fn list_reconciled(
 
     rows.into_iter()
         .map(
-            |(id_str, sid_str, date_str, amount, vendor, matched, ignored)| {
+            |(id_str, sid_str, date_str, amount, vendor, matched, ignored, metadata_str)| {
+                let metadata: HashMap<String, String> =
+                    serde_json::from_str(&metadata_str).unwrap_or_default();
                 Ok(ReconciledTxn {
                     txn_id: Uuid::parse_str(&id_str)?,
                     session_id: Uuid::parse_str(&sid_str)?,
@@ -226,6 +245,7 @@ pub async fn list_reconciled(
                     vendor,
                     matched,
                     ignored,
+                    metadata,
                 })
             },
         )
@@ -238,16 +258,19 @@ pub async fn add_reconciled(
     date: NaiveDate,
     amount: i64,
     vendor: &str,
+    metadata: &HashMap<String, String>,
 ) -> Result<Uuid, AppError> {
     let id = Uuid::now_v7();
+    let metadata_json = serde_json::to_string(metadata).unwrap_or_else(|_| "{}".to_string());
     sqlx::query(
-        "INSERT INTO reconciled_txns (txn_id, session_id, date, amount, vendor) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO reconciled_txns (txn_id, session_id, date, amount, vendor, metadata) VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(id.to_string())
     .bind(session_id.to_string())
     .bind(date.to_string())
     .bind(amount)
     .bind(vendor)
+    .bind(&metadata_json)
     .execute(pool)
     .await?;
     Ok(id)
@@ -258,22 +281,30 @@ pub async fn add_reconciled(
 pub async fn bulk_add_reconciled(
     pool: &SqlitePool,
     session_id: Uuid,
-    txns: &[(NaiveDate, i64, String)],
+    txns: &[crate::models::csv_import::CsvRow],
 ) -> Result<usize, AppError> {
     let mut count = 0usize;
-    for (date, amount, vendor) in txns {
+    for row in txns {
         let exists: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM reconciled_txns WHERE session_id = ? AND date = ? AND amount = ? AND vendor = ? AND deleted_at IS NULL)",
         )
         .bind(session_id.to_string())
-        .bind(date.to_string())
-        .bind(*amount)
-        .bind(vendor)
+        .bind(row.date.to_string())
+        .bind(row.amount)
+        .bind(&row.vendor)
         .fetch_one(pool)
         .await?;
 
         if !exists {
-            add_reconciled(pool, session_id, *date, *amount, vendor).await?;
+            add_reconciled(
+                pool,
+                session_id,
+                row.date,
+                row.amount,
+                &row.vendor,
+                &row.metadata,
+            )
+            .await?;
             count += 1;
         }
     }
@@ -506,6 +537,7 @@ mod tests {
             vendor: "test".to_string(),
             matched: false,
             ignored: false,
+            metadata: HashMap::new(),
         }
     }
 
