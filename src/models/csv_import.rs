@@ -40,6 +40,7 @@ fn try_parse_date(val: &str) -> Option<String> {
         "%b %d, %Y",
         "%d %b %Y",
         "%B %d, %Y",
+        "%d %B %y",
         "%d %B %Y",
         "%m-%d-%Y",
         "%d-%m-%Y",
@@ -361,6 +362,11 @@ mod tests {
             try_parse_date("July 1, 2025"),
             Some("%B %d, %Y".to_string())
         );
+    }
+
+    #[test]
+    fn try_parse_date_named_month_short_year() {
+        assert_eq!(try_parse_date("25 July 25"), Some("%d %B %y".to_string()));
     }
 
     #[test]
