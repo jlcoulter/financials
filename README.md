@@ -53,7 +53,7 @@ migrations/
 ```bash
 cargo run
 # with debug logging
-RUST_LOG=rust_web=debug cargo run
+RUST_LOG=financials=debug cargo run
 ```
 
 Listens on `0.0.0.0:3000`.

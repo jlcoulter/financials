@@ -11,7 +11,7 @@ services:
       - DB_PATH=/data/data.db
       - CONFIG_DIR=/config
       - STATIC_DIR=/app/static
-      - RUST_LOG=rust_web=debug
+      - RUST_LOG=financials=debug
     restart: unless-stopped
 
   litestream:

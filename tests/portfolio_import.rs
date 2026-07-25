@@ -1,4 +1,4 @@
-use rust_web::models::portfolio;
+use financials::models::portfolio;
 use std::collections::HashMap;
 
 mod helpers {
