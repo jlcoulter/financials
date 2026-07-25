@@ -939,6 +939,56 @@ th.th--debt {
     padding: 0;
 }
 
+/* ── Drag-and-drop file upload ── */
+.csv-dropzones {
+    display: flex;
+    gap: 16px;
+    margin-top: 8px;
+}
+.dropzone {
+    flex: 1;
+    padding: 24px 16px;
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    text-align: center;
+    cursor: pointer;
+    transition:
+        border-color 0.2s,
+        background 0.2s;
+    position: relative;
+}
+.dropzone:hover {
+    border-color: var(--accent);
+    background: var(--surface2);
+}
+.dropzone--dragover {
+    border-color: var(--accent);
+    background: var(--surface2);
+    border-style: solid;
+}
+.dropzone--has-file .dropzone-hint {
+    color: var(--green);
+    font-weight: 600;
+}
+.dropzone-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+}
+.dropzone-hint {
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+.dropzone-input {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
 .txn-unlink-form {
     display: inline;
     margin: 0;

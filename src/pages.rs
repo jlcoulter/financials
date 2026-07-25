@@ -1368,21 +1368,35 @@ pub async fn reconcile_detail(
                 }
                 details class="add-item-details" {
                     summary { "↑ Upload CSV" }
-                    form method="post" action=(format!("/reconcile/{}/outgoing/csv", session_id))
-                          enctype="multipart/form-data"
-                          class="add-item-form reconcile-add-form" {
-                        label { "Outgoing CSV"
-                            input type="file" name="csv_file" accept=".csv" {}
+                    div class="csv-dropzones" {
+                        div class="dropzone" id=(format!("dz-outgoing-{}", session_id))
+                            ondragover=(format!("event.preventDefault(); document.getElementById('dz-outgoing-{}').classList.add('dropzone--dragover')", session_id))
+                            ondragleave=(format!("document.getElementById('dz-outgoing-{}').classList.remove('dropzone--dragover')", session_id))
+                            ondrop=(format!("event.preventDefault(); document.getElementById('dz-outgoing-{}').classList.remove('dropzone--dragover'); var f=event.dataTransfer.files[0]; if(f){{document.getElementById('file-outgoing-{}').files=f; document.getElementById('file-outgoing-{}').closest('form').requestSubmit()}}", session_id, session_id, session_id))
+                            onclick=(format!("document.getElementById('file-outgoing-{}').click()", session_id)) {
+                            div class="dropzone-label" { "Outgoing CSV" }
+                            div class="dropzone-hint" { "Drop file here or click to browse" }
                         }
-                        button type="submit" { "Upload Outgoing" }
+                        div class="dropzone" id=(format!("dz-reconciled-{}", session_id))
+                            ondragover=(format!("event.preventDefault(); document.getElementById('dz-reconciled-{}').classList.add('dropzone--dragover')", session_id))
+                            ondragleave=(format!("document.getElementById('dz-reconciled-{}').classList.remove('dropzone--dragover')", session_id))
+                            ondrop=(format!("event.preventDefault(); document.getElementById('dz-reconciled-{}').classList.remove('dropzone--dragover'); var f=event.dataTransfer.files[0]; if(f){{document.getElementById('file-reconciled-{}').files=f; document.getElementById('file-reconciled-{}').closest('form').requestSubmit()}}", session_id, session_id, session_id))
+                            onclick=(format!("document.getElementById('file-reconciled-{}').click()", session_id)) {
+                            div class="dropzone-label" { "Reconciled CSV" }
+                            div class="dropzone-hint" { "Drop file here or click to browse" }
+                        }
+                    }
+                    form method="post" action=(format!("/reconcile/{}/outgoing/csv", session_id))
+                          enctype="multipart/form-data" style="display:none" {
+                        input type="file" name="csv_file" accept=".csv"
+                               id=(format!("file-outgoing-{}", session_id))
+                               onchange="if(this.files.length){this.closest('form').requestSubmit()}" {}
                     }
                     form method="post" action=(format!("/reconcile/{}/reconciled/csv", session_id))
-                          enctype="multipart/form-data"
-                          class="add-item-form reconcile-add-form" {
-                        label { "Reconciled CSV"
-                            input type="file" name="csv_file" accept=".csv" {}
-                        }
-                        button type="submit" { "Upload Reconciled" }
+                          enctype="multipart/form-data" style="display:none" {
+                        input type="file" name="csv_file" accept=".csv"
+                               id=(format!("file-reconciled-{}", session_id))
+                               onchange="if(this.files.length){this.closest('form').requestSubmit()}" {}
                     }
                 }
                 @if !unmatched_outgoing.is_empty() || !unmatched_reconciled.is_empty() {
