@@ -126,18 +126,49 @@ pub async fn delete_session(pool: &SqlitePool, session_id: Uuid) -> Result<(), A
     Ok(())
 }
 
+/// Sort order for listing transactions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SortOrder {
+    #[default]
+    Date,
+    Amount,
+}
+
+impl std::fmt::Display for SortOrder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Date => write!(f, "date"),
+            Self::Amount => write!(f, "amount"),
+        }
+    }
+}
+
 // ── Outgoing transactions ──
 
 pub async fn list_outgoing(
     pool: &SqlitePool,
     session_id: Uuid,
+    sort: SortOrder,
 ) -> Result<Vec<OutgoingTxn>, AppError> {
-    let rows = sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
-        "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM outgoing_txns WHERE session_id = ? AND deleted_at IS NULL AND (ignored IS NULL OR ignored = FALSE) ORDER BY amount DESC, date, created_at",
-    )
-    .bind(session_id.to_string())
-    .fetch_all(pool)
-    .await?;
+    let rows = match sort {
+        SortOrder::Date => {
+            sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+                "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM outgoing_txns WHERE session_id = ? AND deleted_at IS NULL AND (ignored IS NULL OR ignored = FALSE) ORDER BY date DESC, created_at DESC",
+            )
+            .bind(session_id.to_string())
+            .fetch_all(pool)
+            .await?
+        }
+        SortOrder::Amount => {
+            sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+                "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM outgoing_txns WHERE session_id = ? AND deleted_at IS NULL AND (ignored IS NULL OR ignored = FALSE) ORDER BY amount DESC, date, created_at",
+            )
+            .bind(session_id.to_string())
+            .fetch_all(pool)
+            .await?
+        }
+    };
 
     rows.into_iter()
         .map(
@@ -224,13 +255,26 @@ pub async fn bulk_add_outgoing(
 pub async fn list_reconciled(
     pool: &SqlitePool,
     session_id: Uuid,
+    sort: SortOrder,
 ) -> Result<Vec<ReconciledTxn>, AppError> {
-    let rows = sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
-        "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM reconciled_txns WHERE session_id = ? AND deleted_at IS NULL AND (ignored IS NULL OR ignored = FALSE) ORDER BY amount DESC, date, created_at",
-    )
-    .bind(session_id.to_string())
-    .fetch_all(pool)
-    .await?;
+    let rows = match sort {
+        SortOrder::Date => {
+            sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+                "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM reconciled_txns WHERE session_id = ? AND deleted_at IS NULL AND (ignored IS NULL OR ignored = FALSE) ORDER BY date DESC, created_at DESC",
+            )
+            .bind(session_id.to_string())
+            .fetch_all(pool)
+            .await?
+        }
+        SortOrder::Amount => {
+            sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+                "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM reconciled_txns WHERE session_id = ? AND deleted_at IS NULL AND (ignored IS NULL OR ignored = FALSE) ORDER BY amount DESC, date, created_at",
+            )
+            .bind(session_id.to_string())
+            .fetch_all(pool)
+            .await?
+        }
+    };
 
     rows.into_iter()
         .map(
@@ -439,8 +483,8 @@ pub async fn auto_match(
     session_id: Uuid,
     skip_ids: &[Uuid],
 ) -> Result<Vec<Proposal>, AppError> {
-    let outgoing = list_outgoing(pool, session_id).await?;
-    let reconciled = list_reconciled(pool, session_id).await?;
+    let outgoing = list_outgoing(pool, session_id, SortOrder::Amount).await?;
+    let reconciled = list_reconciled(pool, session_id, SortOrder::Amount).await?;
 
     // Sort unmatched outgoing by amount descending so larger values get matched first
     let mut unmatched_outgoing: Vec<&OutgoingTxn> = outgoing
