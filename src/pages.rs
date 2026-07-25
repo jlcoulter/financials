@@ -2976,6 +2976,7 @@ pub async fn settings(
             div class="settings-tabs" {
                 button class="tab-btn active" data-tab="backup" { "Backup" }
                 button class="tab-btn" data-tab="restore" { "Restore" }
+                button class="tab-btn" data-tab="password" { "Password" }
             }
 
             @if let Some(msg) = flash {
@@ -2989,6 +2990,8 @@ pub async fn settings(
                     div class="flash flash-success" { "Database restored from backup" }
                 } @else if msg == "restore_failed" {
                     div class="flash flash-error" { "Restore failed — check server logs for details" }
+                } @else if msg == "password_changed" {
+                    div class="flash flash-success" { "Password updated successfully" }
                 }
             }
 
@@ -3119,6 +3122,12 @@ pub async fn settings(
                         "No backup configuration found. Configure backups first."
                     }
                 }
+            }
+
+            div id="password" class="tab-content" style="display:none" {
+                h3 { "Password" }
+                p { "Change your admin login password." }
+                a href="/change-password" class="btn" { "Change Password" }
             }
 
             script type="text/javascript" {
@@ -3462,6 +3471,7 @@ pub async fn backup_page(
             div class="settings-tabs" {
                 button class="tab-btn active" data-tab="backup" { "Backup" }
                 button class="tab-btn" data-tab="restore" { "Restore" }
+                button class="tab-btn" data-tab="password" { "Password" }
             }
 
             @if let Some(msg) = flash {
@@ -3475,6 +3485,8 @@ pub async fn backup_page(
                     div class="flash flash-success" { "Database restored from backup" }
                 } @else if msg == "restore_failed" {
                     div class="flash flash-error" { "Restore failed — check server logs for details" }
+                } @else if msg == "password_changed" {
+                    div class="flash flash-success" { "Password updated successfully" }
                 }
             }
 
