@@ -2117,8 +2117,18 @@ async fn upload_csv(
                 .map_err(|e| AppError::BadRequest(format!("Failed to save CSV: {}", e)))?;
 
             let num_cols = analysis.preview_rows.first().map(|r| r.len()).unwrap_or(0);
-            let col_options: Vec<String> =
-                (0..num_cols).map(|i| format!("Column {}", i + 1)).collect();
+            let col_options: Vec<String> = (0..num_cols)
+                .map(|i| {
+                    let example = analysis
+                        .preview_rows
+                        .first()
+                        .and_then(|row| row.get(i))
+                        .filter(|v| !v.is_empty())
+                        .map(|v| format!(" > {}", v))
+                        .unwrap_or_default();
+                    format!("Column {}{}", i + 1, example)
+                })
+                .collect();
 
             // Grab a sample date from the first preview row to show format examples
             let date_examples: Vec<(&'static str, String)> = analysis
