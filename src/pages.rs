@@ -2117,8 +2117,18 @@ async fn upload_csv(
                 .map_err(|e| AppError::BadRequest(format!("Failed to save CSV: {}", e)))?;
 
             let num_cols = analysis.preview_rows.first().map(|r| r.len()).unwrap_or(0);
-            let col_options: Vec<String> =
-                (0..num_cols).map(|i| format!("Column {}", i + 1)).collect();
+            let col_options: Vec<String> = (0..num_cols)
+                .map(|i| {
+                    let example = analysis
+                        .preview_rows
+                        .first()
+                        .and_then(|row| row.get(i))
+                        .filter(|v| !v.is_empty())
+                        .map(|v| format!(" > {}", v))
+                        .unwrap_or_default();
+                    format!("Column {}{}", i + 1, example)
+                })
+                .collect();
 
             // Grab a sample date from the first preview row to show format examples
             let date_examples: Vec<(&'static str, String)> = analysis
@@ -2682,9 +2692,14 @@ pub async fn portfolio_import_post(
                             div class="csv-mapping-row" style="margin: 0.5em 0; padding: 0.5em; border: 1px solid var(--border); border-radius: 4px;" {
                                 @let col_header = analysis.headers.get(col_idx).map(|s| s.as_str()).unwrap_or("");
                                 @let col_label = if col_header.is_empty() { format!("Column {}", col_idx + 1) } else { format!("Column {}: {}", col_idx + 1, col_header) };
+                                // Show first-row example data
+                                @let example_val = analysis.preview_rows.first().and_then(|row| row.get(col_idx)).map(|s| s.as_str()).unwrap_or("");
                                 // Auto-match: if the column header matches an existing item name, select it by default
                                 @let matched_item_id = items.iter().find(|item| item.name.eq_ignore_ascii_case(col_header)).map(|item| item.item_id);
                                 strong { (col_label) }
+                                @if !example_val.is_empty() {
+                                    span class="csv-example" style="margin-left: 0.5em; font-size: 0.85em; color: var(--text-muted);" { (format!("e.g. {}", example_val)) }
+                                }
                                 select name=(format!("col_{}", col_idx)) {
                                     option value="skip" selected[matched_item_id.is_none()] { "— Skip —" }
                                     @for item in &items {
