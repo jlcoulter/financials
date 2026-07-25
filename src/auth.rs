@@ -41,7 +41,7 @@ pub async fn login(
                 div class="auth-form" {
                     h2 { "Set Your Password" }
                     p { "Welcome! Please set your admin password to continue." }
-                    form action="/change-password" hx-post="/change-password"
+                    form action="/setup-password" hx-post="/setup-password"
                          hx-target="#error-box" method="post" {
                         label { "New Password"
                             input type="password" name="new_password" autofocus {};
@@ -196,4 +196,50 @@ pub async fn change_password_post(
     *state.admin_password_hash.write().unwrap() = new_hash;
 
     Ok(([("HX-Redirect", "/settings?flash=password_changed")]).into_response())
+}
+
+/// First-boot password setup — no auth required (user has no password yet).
+#[derive(Deserialize)]
+pub struct SetupPasswordForm {
+    new_password: String,
+    confirm_password: String,
+}
+
+pub async fn setup_password_post(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    Form(form): Form<SetupPasswordForm>,
+) -> Result<axum::response::Response, AppError> {
+    let uid = *state.admin_user_id.read().unwrap();
+
+    // Verify this user actually needs a password set
+    if !user::password_change_required(&state.db().await, uid).await? {
+        return Err(AppError::BadRequest(
+            "Password is already set. Please log in.".to_string(),
+        ));
+    }
+
+    // Validate new password
+    if form.new_password.len() < 4 {
+        return Err(AppError::BadRequest(
+            "New password must be at least 4 characters".to_string(),
+        ));
+    }
+    if form.new_password != form.confirm_password {
+        return Err(AppError::BadRequest(
+            "New passwords do not match".to_string(),
+        ));
+    }
+
+    // Hash and save
+    let new_hash = bcrypt::hash(&form.new_password, bcrypt::DEFAULT_COST)?;
+    user::update_password(&state.db().await, uid, &new_hash).await?;
+
+    // Update the in-memory hash so subsequent logins use the new one
+    *state.admin_password_hash.write().unwrap() = new_hash;
+
+    // Log the user in
+    let jar = jar.add(login_cookie(uid, state.secure_cookies));
+
+    Ok((jar, [("HX-Redirect", "/dashboard")]).into_response())
 }
