@@ -8,13 +8,16 @@ pub async fn create_user(
     password_hash: &str,
 ) -> Result<Uuid, AppError> {
     let id = Uuid::now_v7();
+    // If a password was provided (non-empty), the user doesn't need to change it.
+    let needs_change = if password_hash.is_empty() { 1 } else { 0 };
     let result = sqlx::query(
         "INSERT INTO users (user_id, username, password_hash, password_change_required) \
-         VALUES (?, ?, ?, 1)",
+         VALUES (?, ?, ?, ?)",
     )
     .bind(id.to_string())
     .bind(username)
     .bind(password_hash)
+    .bind(needs_change)
     .execute(pool)
     .await;
 
