@@ -1,4 +1,4 @@
-use rust_web::models::user;
+use financials::models::user;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 use std::str::FromStr;

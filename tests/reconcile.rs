@@ -1,5 +1,5 @@
-use rust_web::models::csv_import::CsvRow;
-use rust_web::models::reconcile;
+use financials::models::csv_import::CsvRow;
+use financials::models::reconcile;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 use std::collections::HashMap;

@@ -8,9 +8,9 @@ RUN touch src/main.rs && cargo build --release
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
-COPY --from=builder /app/target/release/rust-web /usr/local/bin/rust-web
+COPY --from=builder /app/target/release/financials /usr/local/bin/financials
 WORKDIR /app
 COPY src/static /app/static
 ENV STATIC_DIR=/app/static
 EXPOSE 3000
-CMD ["rust-web"]
+CMD ["financials"]

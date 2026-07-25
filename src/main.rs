@@ -1,7 +1,7 @@
-use rust_web::AppState;
-use rust_web::auth;
-use rust_web::models::user;
-use rust_web::pages;
+use financials::AppState;
+use financials::auth;
+use financials::models::user;
+use financials::pages;
 use std::str::FromStr;
 
 use axum::Router;
@@ -42,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("rust_web=debug".parse().unwrap()),
+                .add_directive("financials=debug".parse().unwrap()),
         )
         .init();
 
@@ -101,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 // Read current config from DB
                 let pool = db_inner.read().await.clone();
-                let config = match rust_web::models::backup::get_config(&pool).await {
+                let config = match financials::models::backup::get_config(&pool).await {
                     Ok(Some(c)) => c,
                     _ => {
                         // No config yet — check again in 5 minutes
@@ -122,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
 
                 // Re-read pool and config (may have changed during sleep)
                 let pool = db_inner.read().await.clone();
-                let config = match rust_web::models::backup::get_config(&pool).await {
+                let config = match financials::models::backup::get_config(&pool).await {
                     Ok(Some(c)) if c.enabled => c,
                     _ => continue,
                 };
@@ -131,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
                     "Automatic snapshot: creating (interval={}min)",
                     config.interval_minutes
                 );
-                match rust_web::models::backup::create_snapshot(&pool, &db_path_inner, &config)
+                match financials::models::backup::create_snapshot(&pool, &db_path_inner, &config)
                     .await
                 {
                     Ok(key) => tracing::info!("Automatic snapshot created: {key}"),
