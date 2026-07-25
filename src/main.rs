@@ -151,6 +151,11 @@ async fn main() -> anyhow::Result<()> {
     };
     tracing::info!("listening on {}", listener.local_addr().unwrap());
 
+    // Open the browser at the local server URL as a convenience.
+    if let Err(e) = webbrowser::open("http://localhost:3000") {
+        tracing::warn!("failed to open browser: {e}");
+    }
+
     axum::serve(listener, app(state, static_dir))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
