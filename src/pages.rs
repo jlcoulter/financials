@@ -33,6 +33,7 @@ fn date_format_examples(
         "%b %d, %Y",
         "%d %b %Y",
         "%B %d, %Y",
+        "%d %B %y",
         "%d %B %Y",
     ];
     Some(
