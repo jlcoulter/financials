@@ -2534,9 +2534,11 @@ pub async fn portfolio_import(
                   enctype="multipart/form-data"
                   class="add-item-form" {
                 label { "CSV File"
-                    input type="file" name="csv_file" accept=".csv,.txt" required {}
+                    input type="file" name="csv_file" accept=".csv,.txt" required
+                           id=(format!("csv-file-{}", portfolio_id))
+                           onchange=(format!("document.getElementById('upload-btn-{}').disabled = !this.files.length", portfolio_id)) {}
                 }
-                button type="submit" class="btn" { "Upload & Preview" }
+                button type="submit" class="btn" id=(format!("upload-btn-{}", portfolio_id)) disabled { "Upload & Preview" }
                 " "
                 a href=(format!("/portfolio/{}", portfolio_id)) class="btn btn-ghost" { "Cancel" }
             }
