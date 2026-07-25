@@ -22,6 +22,10 @@ pub struct AppState {
     /// Wrapped in RwLock so it can be updated after a DB restore
     /// (the restored DB may have a different admin user ID).
     pub admin_user_id: Arc<std::sync::RwLock<Uuid>>,
+    /// When true, session cookies get Secure + SameSite=Lax flags.
+    /// Set via SECURE_COOKIES=true env var. Defaults to false so
+    /// home-lab HTTP deployments work out of the box.
+    pub secure_cookies: bool,
 }
 
 impl AppState {

@@ -50,13 +50,16 @@ impl OptionalFromRequestParts<AppState> for LoggedInUser {
     }
 }
 
-pub fn login_cookie(user_id: Uuid) -> Cookie<'static> {
-    Cookie::build(("user_id", user_id.to_string()))
+pub fn login_cookie(user_id: Uuid, secure: bool) -> Cookie<'static> {
+    let mut builder = Cookie::build(("user_id", user_id.to_string()))
         .http_only(true)
-        .secure(true)
-        .same_site(axum_extra::extract::cookie::SameSite::Lax)
-        .path("/")
-        .build()
+        .path("/");
+    if secure {
+        builder = builder
+            .secure(true)
+            .same_site(axum_extra::extract::cookie::SameSite::Lax);
+    }
+    builder.build()
 }
 
 pub fn logout_cookie() -> Cookie<'static> {
@@ -74,11 +77,19 @@ mod tests {
     #[test]
     fn login_cookie_has_correct_properties() {
         let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let cookie = login_cookie(user_id);
+        let cookie = login_cookie(user_id, false);
         assert_eq!(cookie.name_value().0, "user_id");
         assert_eq!(cookie.name_value().1, user_id.to_string());
         assert_eq!(cookie.path(), Some("/"));
         assert!(cookie.http_only().unwrap_or(false));
+        assert!(!cookie.secure().unwrap_or(false));
+        assert_eq!(cookie.same_site(), None);
+    }
+
+    #[test]
+    fn login_cookie_secure_mode() {
+        let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let cookie = login_cookie(user_id, true);
         assert!(cookie.secure().unwrap_or(false));
         assert_eq!(
             cookie.same_site(),

@@ -57,7 +57,7 @@ pub async fn login_post(
     let valid = bcrypt::verify(&form.password, &state.admin_password_hash)?;
     if valid {
         let uid = *state.admin_user_id.read().unwrap();
-        let jar = jar.add(login_cookie(uid));
+        let jar = jar.add(login_cookie(uid, state.secure_cookies));
         Ok((jar, [("HX-Redirect", "/dashboard")]).into_response())
     } else {
         Err(AppError::Unauthorized("Invalid password".to_string()))
