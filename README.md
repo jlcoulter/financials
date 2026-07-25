@@ -2,6 +2,17 @@
 
 Personal finance app for reconciling transactions and tracking net worth over time.
 
+## First-time setup
+
+On first boot the app creates an admin user with no password set. You'll be prompted to set a password on your first login — any password will work to get in, and you'll be redirected to the password setup page immediately.
+
+Set credentials via environment variables (optional):
+- `ADMIN_USERNAME` — defaults to `admin`
+- `ADMIN_PASSWORD` — sets an initial password (skips the first-run prompt)
+- `ADMIN_PASSWORD_HASH` — a bcrypt hash; overrides `ADMIN_PASSWORD`
+
+If neither `ADMIN_PASSWORD` nor `ADMIN_PASSWORD_HASH` is set, the app starts with no password and the user must set one on first login. The password is persisted in the database and survives restarts.
+
 ## What it does
 
 Two core functions:
@@ -57,3 +68,9 @@ RUST_LOG=rust_web=debug cargo run
 ```
 
 Listens on `0.0.0.0:3000`.
+
+### Password management
+
+On first boot no password is set. Log in with any password and you'll be redirected to the **Set Your Password** page. You can also reach it from the **Password** tab in **Settings** on any authenticated page or via `/change-password`.
+
+The password is stored as a bcrypt hash in the database and persists across restarts. To reset it, set `ADMIN_PASSWORD` or `ADMIN_PASSWORD_HASH` in the environment and delete the database — the app will create a fresh one on next startup.

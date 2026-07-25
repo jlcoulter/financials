@@ -2803,6 +2803,9 @@ pub async fn settings(
     let username = user::get_username_by_id(&state.db().await, user.0)
         .await
         .unwrap_or_else(|_| "User".to_string());
+    let needs_password = user::password_change_required(&state.db().await, user.0)
+        .await
+        .unwrap_or(false);
 
     let flash = params.flash.as_deref();
 
@@ -2869,6 +2872,7 @@ pub async fn settings(
             div class="settings-tabs" {
                 button class="tab-btn active" data-tab="backup" { "Backup" }
                 button class="tab-btn" data-tab="restore" { "Restore" }
+                button class="tab-btn" data-tab="password" { "Password" }
             }
 
             @if let Some(msg) = flash {
@@ -2882,6 +2886,8 @@ pub async fn settings(
                     div class="flash flash-success" { "Database restored from backup" }
                 } @else if msg == "restore_failed" {
                     div class="flash flash-error" { "Restore failed — check server logs for details" }
+                } @else if msg == "password_changed" {
+                    div class="flash flash-success" { "Password changed successfully" }
                 }
             }
 
@@ -3012,6 +3018,31 @@ pub async fn settings(
                         "No backup configuration found. Configure backups first."
                     }
                 }
+            }
+
+            div id="password" class="tab-content" style="display:none" {
+                @if needs_password {
+                    h3 { "Set Your Password" }
+                    p { "Welcome! Please set your password to continue." }
+                } @else {
+                    h3 { "Change Password" }
+                    p { "Update your login password." }
+                }
+                form action="/change-password" hx-post="/change-password" hx-target="#password-error-box" method="post" {
+                    @if !needs_password {
+                        label { "Current Password"
+                            input type="password" name="current_password" autofocus {};
+                        }
+                    }
+                    label { "New Password"
+                        input type="password" name="new_password" autofocus[needs_password] {};
+                    }
+                    label { "Confirm New Password"
+                        input type="password" name="confirm_password" {};
+                    }
+                    button type="submit" { @if needs_password { "Set Password" } @else { "Change Password" } }
+                }
+                div id="password-error-box" {}
             }
 
             script type="text/javascript" {
@@ -3186,14 +3217,14 @@ pub async fn settings_backup_restore(
             // Re-seed admin user so the in-memory admin_user_id matches
             // the restored DB (which may have a different user ID).
             let pool = state.db().await;
-            let new_admin_id =
-                user::seed_admin(&pool, &state.admin_username, &state.admin_password_hash)
-                    .await
-                    .map_err(|e| {
-                        AppError::Internal(anyhow::anyhow!(
-                            "failed to re-seed admin after restore: {e:?}"
-                        ))
-                    })?;
+            let hash = state.admin_password_hash.read().unwrap().clone();
+            let (new_admin_id, _) = user::seed_admin(&pool, &state.admin_username, &hash)
+                .await
+                .map_err(|e| {
+                    AppError::Internal(anyhow::anyhow!(
+                        "failed to re-seed admin after restore: {e:?}"
+                    ))
+                })?;
             *state.admin_user_id.write().unwrap() = new_admin_id;
             drop(pool);
             tracing::info!("Admin user re-synced after restore (id={new_admin_id})");
@@ -3636,14 +3667,14 @@ pub async fn backup_restore(
             // Re-seed admin user so the in-memory admin_user_id matches
             // the restored DB (which may have a different user ID).
             let pool = state.db().await;
-            let new_admin_id =
-                user::seed_admin(&pool, &state.admin_username, &state.admin_password_hash)
-                    .await
-                    .map_err(|e| {
-                        AppError::Internal(anyhow::anyhow!(
-                            "failed to re-seed admin after restore: {e:?}"
-                        ))
-                    })?;
+            let hash = state.admin_password_hash.read().unwrap().clone();
+            let (new_admin_id, _) = user::seed_admin(&pool, &state.admin_username, &hash)
+                .await
+                .map_err(|e| {
+                    AppError::Internal(anyhow::anyhow!(
+                        "failed to re-seed admin after restore: {e:?}"
+                    ))
+                })?;
             *state.admin_user_id.write().unwrap() = new_admin_id;
             drop(pool);
             tracing::info!("Admin user re-synced after restore (id={new_admin_id})");
