@@ -67,9 +67,10 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Seed the admin user (create or update password)
-    let admin_user_id = user::seed_admin(&db, &admin_username, &admin_password_hash)
-        .await
-        .map_err(|e| anyhow::anyhow!("failed to seed admin: {e:?}"))?;
+    let (admin_user_id, _stored_hash) =
+        user::seed_admin(&db, &admin_username, &admin_password_hash)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to seed admin: {e:?}"))?;
     tracing::info!("Admin user '{admin_username}' ready (id={admin_user_id})");
 
     let key = axum_extra::extract::cookie::Key::generate();

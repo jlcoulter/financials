@@ -3293,7 +3293,7 @@ pub async fn settings_backup_restore(
             // Re-seed admin user so the in-memory admin_user_id matches
             // the restored DB (which may have a different user ID).
             let pool = state.db().await;
-            let new_admin_id =
+            let (new_admin_id, _) =
                 user::seed_admin(&pool, &state.admin_username, &state.admin_password_hash)
                     .await
                     .map_err(|e| {
@@ -3743,7 +3743,7 @@ pub async fn backup_restore(
             // Re-seed admin user so the in-memory admin_user_id matches
             // the restored DB (which may have a different user ID).
             let pool = state.db().await;
-            let new_admin_id =
+            let (new_admin_id, _) =
                 user::seed_admin(&pool, &state.admin_username, &state.admin_password_hash)
                     .await
                     .map_err(|e| {
