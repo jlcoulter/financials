@@ -365,10 +365,8 @@ pub async fn restore_from_snapshot(
     // Remove WAL/SHM from old database
     let wal_path = format!("{db_path}-wal");
     let shm_path = format!("{db_path}-shm");
-    let lstream_dir = format!("{db_path}-litestream");
     let _ = std::fs::remove_file(&wal_path);
     let _ = std::fs::remove_file(&shm_path);
-    let _ = std::fs::remove_dir_all(&lstream_dir);
 
     // Swap the database file
     std::fs::rename(&restore_path, db_path).map_err(|e| {
