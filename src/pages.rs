@@ -15,6 +15,34 @@ use chrono::NaiveDate;
 use serde::Deserialize;
 use uuid::Uuid;
 
+/// Given a sample date string and its detected format, try to parse it and
+/// return examples showing what each format in the dropdown would render as.
+/// Returns `None` if the sample can't be parsed with the detected format.
+fn date_format_examples(
+    sample: &str,
+    detected_format: &str,
+) -> Option<Vec<(&'static str, String)>> {
+    let date = NaiveDate::parse_from_str(sample, detected_format).ok()?;
+    let formats: &[&'static str] = &[
+        "%d/%m/%Y",
+        "%d/%m/%y",
+        "%Y-%m-%d",
+        "%m/%d/%Y",
+        "%m/%d/%y",
+        "%Y/%m/%d",
+        "%b %d, %Y",
+        "%d %b %Y",
+        "%B %d, %Y",
+        "%d %B %Y",
+    ];
+    Some(
+        formats
+            .iter()
+            .map(|fmt| (*fmt, date.format(fmt).to_string()))
+            .collect(),
+    )
+}
+
 struct GridRow {
     date: NaiveDate,
     values: Vec<Option<i64>>,
@@ -2036,6 +2064,19 @@ async fn upload_csv(
             let col_options: Vec<String> =
                 (0..num_cols).map(|i| format!("Column {}", i + 1)).collect();
 
+            // Grab a sample date from the first preview row to show format examples
+            let date_examples: Vec<(&'static str, String)> = analysis
+                .preview_rows
+                .first()
+                .and_then(|row| {
+                    let sample = row.get(analysis.detected.date_col)?;
+                    if sample.is_empty() {
+                        return None;
+                    }
+                    date_format_examples(sample, &analysis.detected.date_format)
+                })
+                .unwrap_or_default();
+
             return Ok(layout(
                 &format!("Import CSV — {}", name),
                 maud::html! {
@@ -2108,8 +2149,9 @@ async fn upload_csv(
 
                             label { "Date format" }
                             select name="date_format" {
-                                @for fmt in &["%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y"] {
-                                    option value=(fmt) selected[*fmt == analysis.detected.date_format] { (fmt) }
+                                @for (fmt, example) in &date_examples {
+                                    @let selected = if *fmt == analysis.detected.date_format { " selected" } else { "" };
+                                    option value=(fmt) selected[selected == " selected"] { (format!("{}  →  {}", fmt, example)) }
                                 }
                             }
                         }
@@ -2501,6 +2543,19 @@ pub async fn portfolio_import_post(
     // Detect which column looks like a date
     let date_col = analysis.detected.date_col;
 
+    // Grab a sample date from the first preview row to show format examples
+    let date_examples: Vec<(&'static str, String)> = analysis
+        .preview_rows
+        .first()
+        .and_then(|row| {
+            let sample = row.get(date_col)?;
+            if sample.is_empty() {
+                return None;
+            }
+            date_format_examples(sample, &analysis.detected.date_format)
+        })
+        .unwrap_or_default();
+
     Ok(layout(
         &format!("Map Columns — {}", name),
         maud::html! {
@@ -2556,8 +2611,9 @@ pub async fn portfolio_import_post(
 
                     label { "Date format" }
                     select name="date_format" {
-                        @for fmt in &["%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y"] {
-                            option value=(fmt) selected[*fmt == analysis.detected.date_format] { (fmt) }
+                        @for (fmt, example) in &date_examples {
+                            @let selected = if *fmt == analysis.detected.date_format { " selected" } else { "" };
+                            option value=(fmt) selected[selected == " selected"] { (format!("{}  →  {}", fmt, example)) }
                         }
                     }
 
