@@ -172,25 +172,12 @@ fn app(state: AppState, static_dir: String) -> Router {
         .route("/login", axum::routing::post(auth::login_post))
         .route("/backup", axum::routing::get(pages::backup_page))
         .route(
-            "/backup/configure",
-            axum::routing::post(pages::backup_configure),
-        )
-        .route("/backup/enable", axum::routing::post(pages::backup_enable))
-        .route(
-            "/backup/disable",
-            axum::routing::post(pages::backup_disable),
-        )
-        .route(
             "/backup/restore",
             axum::routing::post(pages::backup_restore),
         )
         .route(
             "/backup/restore-points",
             axum::routing::get(pages::backup_restore_points),
-        )
-        .route(
-            "/backup/snapshot",
-            axum::routing::post(pages::backup_snapshot),
         )
         // Authenticated routes
         .route("/dashboard", axum::routing::get(pages::dashboard))
@@ -218,6 +205,19 @@ fn app(state: AppState, static_dir: String) -> Router {
         .route(
             "/settings/backup/snapshot",
             axum::routing::post(pages::settings_backup_snapshot),
+        )
+        .route(
+            "/backup/configure",
+            axum::routing::post(pages::backup_configure),
+        )
+        .route("/backup/enable", axum::routing::post(pages::backup_enable))
+        .route(
+            "/backup/disable",
+            axum::routing::post(pages::backup_disable),
+        )
+        .route(
+            "/backup/snapshot",
+            axum::routing::post(pages::backup_snapshot),
         )
         .route("/insights", axum::routing::get(pages::insights))
         .route("/insights/{id}", axum::routing::get(pages::insights_chart))
