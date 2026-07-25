@@ -3611,6 +3611,7 @@ pub async fn backup_page(
 /// Public backup configuration POST handler.
 pub async fn backup_configure(
     State(state): State<AppState>,
+    _user: LoggedInUser,
     Form(form): Form<PublicBackupForm>,
 ) -> Result<axum::response::Response, AppError> {
     let endpoint = form.endpoint.filter(|s| !s.trim().is_empty());
@@ -3700,6 +3701,7 @@ pub async fn backup_configure(
 /// Public backup enable POST handler.
 pub async fn backup_enable(
     State(state): State<AppState>,
+    _user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
     backup::set_enabled(&state.db().await, true).await?;
     // Create a snapshot now that backups are enabled
@@ -3715,6 +3717,7 @@ pub async fn backup_enable(
 /// Public backup disable POST handler.
 pub async fn backup_disable(
     State(state): State<AppState>,
+    _user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
     backup::set_enabled(&state.db().await, false).await?;
     Ok(axum::response::Redirect::to("/backup?flash=disabled").into_response())
@@ -3799,6 +3802,7 @@ pub async fn backup_restore_points(
 /// Creates a snapshot immediately and redirects back to the backup page.
 pub async fn backup_snapshot(
     State(state): State<AppState>,
+    _user: LoggedInUser,
 ) -> Result<axum::response::Response, AppError> {
     let config = backup::get_config(&state.db().await)
         .await?
