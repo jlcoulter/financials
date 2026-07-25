@@ -53,6 +53,8 @@ impl OptionalFromRequestParts<AppState> for LoggedInUser {
 pub fn login_cookie(user_id: Uuid) -> Cookie<'static> {
     Cookie::build(("user_id", user_id.to_string()))
         .http_only(true)
+        .secure(true)
+        .same_site(axum_extra::extract::cookie::SameSite::Lax)
         .path("/")
         .build()
 }
@@ -77,6 +79,11 @@ mod tests {
         assert_eq!(cookie.name_value().1, user_id.to_string());
         assert_eq!(cookie.path(), Some("/"));
         assert!(cookie.http_only().unwrap_or(false));
+        assert!(cookie.secure().unwrap_or(false));
+        assert_eq!(
+            cookie.same_site(),
+            Some(axum_extra::extract::cookie::SameSite::Lax)
+        );
     }
 
     #[test]
