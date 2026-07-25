@@ -810,6 +810,11 @@ th.th--debt {
     background: color-mix(in srgb, #f59e0b 8%, var(--card));
 }
 
+.reconcile-txn--exact-match {
+    border-left: 4px solid var(--green);
+    background: color-mix(in srgb, var(--green) 8%, var(--card));
+}
+
 .txn-row {
     display: flex;
     align-items: center;
@@ -880,6 +885,14 @@ th.th--debt {
     color: var(--red);
     font-size: 0.8rem;
     font-weight: 600;
+}
+
+.txn-confidence {
+    color: var(--green);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
 .txn-match-form {
