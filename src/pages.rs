@@ -1882,13 +1882,18 @@ async fn render_proposals_page(
                     @for p in &proposals {
                         @if let Some(o) = outgoing.iter().find(|x| x.txn_id == p.outgoing_id) {
                             @let row_span = p.reconciled_ids.len().max(1);
-                            div class="reconcile-txn reconcile-txn--proposed" style=(format!("grid-row: span {}", row_span)) {
+                            @let is_exact = p.reconciled_ids.len() == 1;
+                            @let txn_class = if is_exact { "reconcile-txn reconcile-txn--exact-match" } else { "reconcile-txn reconcile-txn--proposed" };
+                            div class=(txn_class) style=(format!("grid-row: span {}", row_span)) {
                                 div class="txn-row" {
                                     span class="txn-date" { (utils::format_date(o.date)) }
                                     @if !o.vendor.is_empty() {
                                         span class="txn-vendor" { (o.vendor) }
                                     }
                                     span class="txn-amount" { (utils::format_cents(o.amount)) }
+                                    @if is_exact {
+                                        span class="txn-confidence" { "Exact match" }
+                                    }
                                     form method="post" action=(format!("/reconcile/{}/confirm", session_id)) class="txn-unlink-form" style="display:inline" {
                                         input type="hidden" name="outgoing_id" value=(o.txn_id) {}
                                         @for rid in &p.reconciled_ids {
@@ -1910,7 +1915,7 @@ async fn render_proposals_page(
                             }
                             @for rid in &p.reconciled_ids {
                                 @if let Some(r) = reconciled.iter().find(|x| x.txn_id == *rid) {
-                                    div class="reconcile-txn reconcile-txn--proposed" {
+                                    div class=(txn_class) {
                                         div class="txn-row" {
                                             span class="txn-date" { (utils::format_date(r.date)) }
                                             @if !r.vendor.is_empty() {
