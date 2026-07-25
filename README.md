@@ -65,7 +65,16 @@ Listens on `0.0.0.0:3000`.
 | `DATABASE_URL` | `sqlite://data.db` | SQLite connection string |
 | `DB_PATH` | `data.db` | Path to the SQLite file (used for backups) |
 | `ADMIN_USERNAME` | `admin` | Admin login username |
-| `ADMIN_PASSWORD` | `admin` | Admin login password (plaintext, hashed on first run) |
-| `ADMIN_PASSWORD_HASH` | — | Pre-hashed bcrypt password (overrides `ADMIN_PASSWORD`) |
+| `ADMIN_PASSWORD` | — | Plaintext admin password (hashed on first boot). If not set, you'll be prompted to create one on first visit. |
+| `ADMIN_PASSWORD_HASH` | — | Pre-hashed bcrypt password (overrides `ADMIN_PASSWORD`). Only used on first boot. |
 | `STATIC_DIR` | `src/static` | Directory for static assets |
 | `SECURE_COOKIES` | `false` | Set to `true` or `1` to add `Secure` + `SameSite=Lax` flags to the session cookie. Enable when running behind TLS (e.g. reverse proxy with HTTPS). Leave off for local/home-lab HTTP deployments. |
+
+### First-time setup
+
+On first boot with a fresh database:
+
+- If `ADMIN_PASSWORD` or `ADMIN_PASSWORD_HASH` is set, the admin user is created with that password.
+- If neither is set, you'll see a **"Set Your Password"** page instead of the login form. Enter a new password to continue.
+
+After initial setup, you can change your password from **Settings → Password**. The password survives restarts — environment variables only seed the initial password.

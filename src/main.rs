@@ -55,19 +55,21 @@ async fn main() -> anyhow::Result<()> {
     let db = SqlitePool::connect_with(options).await?;
     sqlx::migrate!().run(&db).await?;
 
-    // Admin credentials from env vars.
-    // ADMIN_USERNAME defaults to "admin", ADMIN_PASSWORD defaults to "admin".
-    // For production, set ADMIN_PASSWORD_HASH to a bcrypt hash instead.
+    // Admin credentials from env vars (optional — on first boot the user sets
+    // their own password via the change-password flow).
     let admin_username = std::env::var("ADMIN_USERNAME").unwrap_or_else(|_| "admin".to_string());
     let admin_password_hash = if let Ok(hash) = std::env::var("ADMIN_PASSWORD_HASH") {
         hash
-    } else {
-        let plain = std::env::var("ADMIN_PASSWORD").unwrap_or_else(|_| "admin".to_string());
+    } else if let Ok(plain) = std::env::var("ADMIN_PASSWORD") {
         bcrypt::hash(&plain, bcrypt::DEFAULT_COST)?
+    } else {
+        // No password configured — store empty string. The user will be
+        // prompted to set a password on first login.
+        String::new()
     };
 
     // Seed the admin user (create or update password)
-    let admin_user_id = user::seed_admin(&db, &admin_username, &admin_password_hash)
+    let (admin_user_id, stored_hash) = user::seed_admin(&db, &admin_username, &admin_password_hash)
         .await
         .map_err(|e| anyhow::anyhow!("failed to seed admin: {e:?}"))?;
     tracing::info!("Admin user '{admin_username}' ready (id={admin_user_id})");
@@ -80,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
         db: Arc::new(RwLock::new(db.clone())),
         key,
         db_path: db_path.clone(),
-        admin_password_hash,
+        admin_password_hash: Arc::new(std::sync::RwLock::new(stored_hash)),
         admin_username: admin_username.clone(),
         admin_user_id: Arc::new(std::sync::RwLock::new(admin_user_id)),
         secure_cookies,
@@ -226,6 +228,18 @@ fn app(state: AppState, static_dir: String) -> Router {
         .route("/insights", axum::routing::get(pages::insights))
         .route("/insights/{id}", axum::routing::get(pages::insights_chart))
         .route("/logout", axum::routing::post(auth::logout_post))
+        .route(
+            "/setup-password",
+            axum::routing::post(auth::setup_password_post),
+        )
+        .route(
+            "/change-password",
+            axum::routing::get(auth::change_password_get),
+        )
+        .route(
+            "/change-password",
+            axum::routing::post(auth::change_password_post),
+        )
         .route("/portfolios", axum::routing::get(pages::portfolios))
         .route("/portfolios", axum::routing::post(pages::create_portfolio))
         .route("/portfolio/{id}", axum::routing::get(pages::portfolio))
