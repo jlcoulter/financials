@@ -57,3 +57,15 @@ RUST_LOG=rust_web=debug cargo run
 ```
 
 Listens on `0.0.0.0:3000`.
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `sqlite://data.db` | SQLite connection string |
+| `DB_PATH` | `data.db` | Path to the SQLite file (used for backups) |
+| `ADMIN_USERNAME` | `admin` | Admin login username |
+| `ADMIN_PASSWORD` | `admin` | Admin login password (plaintext, hashed on first run) |
+| `ADMIN_PASSWORD_HASH` | — | Pre-hashed bcrypt password (overrides `ADMIN_PASSWORD`) |
+| `STATIC_DIR` | `src/static` | Directory for static assets |
+| `SECURE_COOKIES` | `false` | Set to `true` or `1` to add `Secure` + `SameSite=Lax` flags to the session cookie. Enable when running behind TLS (e.g. reverse proxy with HTTPS). Leave off for local/home-lab HTTP deployments. |

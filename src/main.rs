@@ -73,6 +73,9 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Admin user '{admin_username}' ready (id={admin_user_id})");
 
     let key = axum_extra::extract::cookie::Key::generate();
+    let secure_cookies = std::env::var("SECURE_COOKIES")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
     let state = AppState {
         db: Arc::new(RwLock::new(db.clone())),
         key,
@@ -80,6 +83,7 @@ async fn main() -> anyhow::Result<()> {
         admin_password_hash,
         admin_username: admin_username.clone(),
         admin_user_id: Arc::new(std::sync::RwLock::new(admin_user_id)),
+        secure_cookies,
     };
 
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "src/static".to_string());
