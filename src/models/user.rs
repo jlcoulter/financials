@@ -92,3 +92,35 @@ pub async fn seed_admin(
         }
     }
 }
+
+/// Check whether the given user still needs to change their password.
+pub async fn password_change_required(pool: &SqlitePool, user_id: Uuid) -> Result<bool, AppError> {
+    let row = sqlx::query("SELECT password_change_required FROM users WHERE user_id = ?")
+        .bind(user_id.to_string())
+        .fetch_optional(pool)
+        .await?;
+
+    match row {
+        Some(r) => {
+            let val: bool = r.get("password_change_required");
+            Ok(val)
+        }
+        None => Ok(false),
+    }
+}
+
+/// Update the user's password hash and clear the change-required flag.
+pub async fn update_password(
+    pool: &SqlitePool,
+    user_id: Uuid,
+    new_hash: &str,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "UPDATE users SET password_hash = ?, password_change_required = 0 WHERE user_id = ?",
+    )
+    .bind(new_hash)
+    .bind(user_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
