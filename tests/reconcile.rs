@@ -118,7 +118,9 @@ async fn add_and_list_outgoing() {
     .await
     .unwrap();
 
-    let txns = reconcile::list_outgoing(&pool, session_id).await.unwrap();
+    let txns = reconcile::list_outgoing(&pool, session_id, reconcile::SortOrder::default())
+        .await
+        .unwrap();
     assert_eq!(txns.len(), 1);
     assert_eq!(txns[0].txn_id, id);
     assert_eq!(txns[0].amount, 5000);
@@ -162,7 +164,9 @@ async fn bulk_add_outgoing_deduplicates() {
         .unwrap();
     assert_eq!(count, 2); // duplicate not inserted
 
-    let all = reconcile::list_outgoing(&pool, session_id).await.unwrap();
+    let all = reconcile::list_outgoing(&pool, session_id, reconcile::SortOrder::default())
+        .await
+        .unwrap();
     assert_eq!(all.len(), 2);
 }
 
@@ -180,7 +184,9 @@ async fn add_and_list_reconciled() {
         .await
         .unwrap();
 
-    let txns = reconcile::list_reconciled(&pool, session_id).await.unwrap();
+    let txns = reconcile::list_reconciled(&pool, session_id, reconcile::SortOrder::default())
+        .await
+        .unwrap();
     assert_eq!(txns.len(), 1);
     assert_eq!(txns[0].txn_id, id);
 }
@@ -241,9 +247,13 @@ async fn link_and_unlink_transactions() {
         .unwrap();
 
     // Verify both are marked matched
-    let out_txns = reconcile::list_outgoing(&pool, session_id).await.unwrap();
+    let out_txns = reconcile::list_outgoing(&pool, session_id, reconcile::SortOrder::default())
+        .await
+        .unwrap();
     assert!(out_txns[0].matched);
-    let rec_txns = reconcile::list_reconciled(&pool, session_id).await.unwrap();
+    let rec_txns = reconcile::list_reconciled(&pool, session_id, reconcile::SortOrder::default())
+        .await
+        .unwrap();
     assert!(rec_txns[0].matched);
 
     // Verify match exists
@@ -257,9 +267,13 @@ async fn link_and_unlink_transactions() {
         .unwrap();
 
     // Both should be unmatched now
-    let out_txns = reconcile::list_outgoing(&pool, session_id).await.unwrap();
+    let out_txns = reconcile::list_outgoing(&pool, session_id, reconcile::SortOrder::default())
+        .await
+        .unwrap();
     assert!(!out_txns[0].matched);
-    let rec_txns = reconcile::list_reconciled(&pool, session_id).await.unwrap();
+    let rec_txns = reconcile::list_reconciled(&pool, session_id, reconcile::SortOrder::default())
+        .await
+        .unwrap();
     assert!(!rec_txns[0].matched);
 
     // No matches left
@@ -370,8 +384,12 @@ async fn delete_session_cascades_to_matches() {
     // Delete the session — should soft-delete everything
     reconcile::delete_session(&pool, session_id).await.unwrap();
 
-    let out_txns = reconcile::list_outgoing(&pool, session_id).await.unwrap();
+    let out_txns = reconcile::list_outgoing(&pool, session_id, reconcile::SortOrder::default())
+        .await
+        .unwrap();
     assert!(out_txns.is_empty());
-    let rec_txns = reconcile::list_reconciled(&pool, session_id).await.unwrap();
+    let rec_txns = reconcile::list_reconciled(&pool, session_id, reconcile::SortOrder::default())
+        .await
+        .unwrap();
     assert!(rec_txns.is_empty());
 }

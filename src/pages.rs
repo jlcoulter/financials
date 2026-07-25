@@ -1319,14 +1319,21 @@ pub async fn reconcile_delete(
     Ok(axum::response::Redirect::to("/reconcile"))
 }
 
+#[derive(serde::Deserialize)]
+pub struct SortQuery {
+    pub sort: Option<reconcile::SortOrder>,
+}
+
 pub async fn reconcile_detail(
     Path(session_id): Path<Uuid>,
     State(state): State<AppState>,
     user: LoggedInUser,
+    Query(query): Query<SortQuery>,
 ) -> Result<maud::Markup, AppError> {
+    let sort = query.sort.unwrap_or_default();
     let (_, name) = reconcile::get_session(&state.db().await, session_id, user.0).await?;
-    let outgoing = reconcile::list_outgoing(&state.db().await, session_id).await?;
-    let reconciled = reconcile::list_reconciled(&state.db().await, session_id).await?;
+    let outgoing = reconcile::list_outgoing(&state.db().await, session_id, sort).await?;
+    let reconciled = reconcile::list_reconciled(&state.db().await, session_id, sort).await?;
     let matches = reconcile::list_matches(&state.db().await, session_id).await?;
 
     // Build lookup: outgoing_id -> list of reconciled_ids
@@ -1431,6 +1438,25 @@ pub async fn reconcile_detail(
                 @if !unmatched_outgoing.is_empty() || !unmatched_reconciled.is_empty() {
                     form method="post" action=(format!("/reconcile/{}/auto-match", session_id)) class="auto-match-form" {
                         button type="submit" class="btn" { "Auto-Match" }
+                    }
+                }
+            }
+
+            // ── Sort toggle ──
+            div class="reconcile-sort-toggle" {
+                @let other_sort = match sort {
+                    reconcile::SortOrder::Date => reconcile::SortOrder::Amount,
+                    reconcile::SortOrder::Amount => reconcile::SortOrder::Date,
+                };
+                @let current_label = match sort {
+                    reconcile::SortOrder::Date => "Sorted by date (newest first)",
+                    reconcile::SortOrder::Amount => "Sorted by amount (highest first)",
+                };
+                span { (current_label) }
+                a href=(format!("/reconcile/{}?sort={}", session_id, other_sort)) class="btn btn-sm" {
+                    @match other_sort {
+                        reconcile::SortOrder::Date => "Sort by date",
+                        reconcile::SortOrder::Amount => "Sort by amount",
                     }
                 }
             }
@@ -1809,8 +1835,18 @@ async fn render_proposals_page(
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let proposals = reconcile::auto_match(&state.db().await, session_id, skip_ids).await?;
     let (_, name) = reconcile::get_session(&state.db().await, session_id, user.0).await?;
-    let outgoing = reconcile::list_outgoing(&state.db().await, session_id).await?;
-    let reconciled = reconcile::list_reconciled(&state.db().await, session_id).await?;
+    let outgoing = reconcile::list_outgoing(
+        &state.db().await,
+        session_id,
+        reconcile::SortOrder::default(),
+    )
+    .await?;
+    let reconciled = reconcile::list_reconciled(
+        &state.db().await,
+        session_id,
+        reconcile::SortOrder::default(),
+    )
+    .await?;
 
     Ok(layout(
         &format!("Reconcile — {}", name),
