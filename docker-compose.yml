@@ -14,17 +14,6 @@ services:
       - RUST_LOG=financials=debug
     restart: unless-stopped
 
-  litestream:
-    image: litestream/litestream:0.3
-    volumes:
-      - data:/data
-      - config:/config
-      - ./litestream-sidecar.sh:/bin/sidecar.sh:ro
-    entrypoint: ["/bin/sh", "/bin/sidecar.sh"]
-    depends_on:
-      - app
-    restart: unless-stopped
-
 volumes:
   data:
   config:

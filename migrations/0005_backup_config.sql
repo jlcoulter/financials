@@ -1,5 +1,4 @@
 -- One backup config per user. Stores S3/B2 credentials and path.
--- Litestream replicates the SQLite DB to this remote location.
 CREATE TABLE IF NOT EXISTS backup_config (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL UNIQUE REFERENCES users(user_id),
