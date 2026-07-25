@@ -8,13 +8,15 @@ pub async fn create_user(
     password_hash: &str,
 ) -> Result<Uuid, AppError> {
     let id = Uuid::now_v7();
-    let result =
-        sqlx::query("INSERT INTO users (user_id, username, password_hash) VALUES (?, ?, ?)")
-            .bind(id.to_string())
-            .bind(username)
-            .bind(password_hash)
-            .execute(pool)
-            .await;
+    let result = sqlx::query(
+        "INSERT INTO users (user_id, username, password_hash, password_change_required) \
+         VALUES (?, ?, ?, 1)",
+    )
+    .bind(id.to_string())
+    .bind(username)
+    .bind(password_hash)
+    .execute(pool)
+    .await;
 
     match result {
         Ok(_) => Ok(id),
