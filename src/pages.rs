@@ -3293,14 +3293,14 @@ pub async fn settings_backup_restore(
             // Re-seed admin user so the in-memory admin_user_id matches
             // the restored DB (which may have a different user ID).
             let pool = state.db().await;
-            let (new_admin_id, _) =
-                user::seed_admin(&pool, &state.admin_username, &state.admin_password_hash)
-                    .await
-                    .map_err(|e| {
-                        AppError::Internal(anyhow::anyhow!(
-                            "failed to re-seed admin after restore: {e:?}"
-                        ))
-                    })?;
+            let current_hash = state.admin_password_hash.read().unwrap().clone();
+            let (new_admin_id, _) = user::seed_admin(&pool, &state.admin_username, &current_hash)
+                .await
+                .map_err(|e| {
+                    AppError::Internal(anyhow::anyhow!(
+                        "failed to re-seed admin after restore: {e:?}"
+                    ))
+                })?;
             *state.admin_user_id.write().unwrap() = new_admin_id;
             drop(pool);
             tracing::info!("Admin user re-synced after restore (id={new_admin_id})");
@@ -3743,14 +3743,14 @@ pub async fn backup_restore(
             // Re-seed admin user so the in-memory admin_user_id matches
             // the restored DB (which may have a different user ID).
             let pool = state.db().await;
-            let (new_admin_id, _) =
-                user::seed_admin(&pool, &state.admin_username, &state.admin_password_hash)
-                    .await
-                    .map_err(|e| {
-                        AppError::Internal(anyhow::anyhow!(
-                            "failed to re-seed admin after restore: {e:?}"
-                        ))
-                    })?;
+            let current_hash = state.admin_password_hash.read().unwrap().clone();
+            let (new_admin_id, _) = user::seed_admin(&pool, &state.admin_username, &current_hash)
+                .await
+                .map_err(|e| {
+                    AppError::Internal(anyhow::anyhow!(
+                        "failed to re-seed admin after restore: {e:?}"
+                    ))
+                })?;
             *state.admin_user_id.write().unwrap() = new_admin_id;
             drop(pool);
             tracing::info!("Admin user re-synced after restore (id={new_admin_id})");

@@ -17,7 +17,8 @@ pub struct AppState {
     pub db: Arc<RwLock<SqlitePool>>,
     pub key: Key,
     pub db_path: String,
-    pub admin_password_hash: String,
+    /// Wrapped in RwLock so it can be updated at runtime (password change).
+    pub admin_password_hash: Arc<std::sync::RwLock<String>>,
     pub admin_username: String,
     /// Wrapped in RwLock so it can be updated after a DB restore
     /// (the restored DB may have a different admin user ID).
