@@ -135,7 +135,20 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    let listener = {
+        let mut port = 3000u16;
+        loop {
+            let addr = format!("0.0.0.0:{port}");
+            match tokio::net::TcpListener::bind(&addr).await {
+                Ok(l) => break l,
+                Err(e) if port < 3100 => {
+                    tracing::warn!("{addr} unavailable ({e}), trying port {}", port + 1);
+                    port += 1;
+                }
+                Err(e) => anyhow::bail!("no available port from 3000..3100: {e}"),
+            }
+        }
+    };
     tracing::info!("listening on {}", listener.local_addr().unwrap());
 
     axum::serve(listener, app(state, static_dir))
