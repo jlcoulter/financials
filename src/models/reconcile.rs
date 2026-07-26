@@ -362,23 +362,36 @@ pub async fn link_transactions(
     outgoing_id: Uuid,
     reconciled_id: Uuid,
 ) -> Result<(), AppError> {
-    let id = Uuid::now_v7();
-    sqlx::query("INSERT INTO match_links (match_id, outgoing_id, reconciled_id) VALUES (?, ?, ?)")
+    // Check if this link already exists
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM match_links WHERE outgoing_id = ? AND reconciled_id = ?)",
+    )
+    .bind(outgoing_id.to_string())
+    .bind(reconciled_id.to_string())
+    .fetch_one(pool)
+    .await?;
+
+    if !exists {
+        let id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO match_links (match_id, outgoing_id, reconciled_id) VALUES (?, ?, ?)",
+        )
         .bind(id.to_string())
         .bind(outgoing_id.to_string())
         .bind(reconciled_id.to_string())
         .execute(pool)
         .await?;
 
-    // Mark both as matched
-    sqlx::query("UPDATE outgoing_txns SET matched = TRUE WHERE txn_id = ?")
-        .bind(outgoing_id.to_string())
-        .execute(pool)
-        .await?;
-    sqlx::query("UPDATE reconciled_txns SET matched = TRUE WHERE txn_id = ?")
-        .bind(reconciled_id.to_string())
-        .execute(pool)
-        .await?;
+        // Mark both as matched
+        sqlx::query("UPDATE outgoing_txns SET matched = TRUE WHERE txn_id = ?")
+            .bind(outgoing_id.to_string())
+            .execute(pool)
+            .await?;
+        sqlx::query("UPDATE reconciled_txns SET matched = TRUE WHERE txn_id = ?")
+            .bind(reconciled_id.to_string())
+            .execute(pool)
+            .await?;
+    }
 
     Ok(())
 }
