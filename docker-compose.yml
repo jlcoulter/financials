@@ -10,6 +10,8 @@ services:
       - DB_PATH=/data/data.db
       - STATIC_DIR=/app/static
       - RUST_LOG=financials=debug
+      # Uncomment to suppress the "failed to open browser" warning in headless environments:
+      # - BROWSER=/bin/true
     restart: unless-stopped
 
 volumes:
