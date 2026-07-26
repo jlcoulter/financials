@@ -1376,7 +1376,9 @@ pub async fn reconcile_detail(
                        onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('form').requestSubmit()}" {}
             }
 
-            form id="reconcile-match-form" method="post" action=(format!("/reconcile/{}/link", session_id)) {}
+            form id="reconcile-match-form" method="post" action=(format!("/reconcile/{}/link", session_id))
+                hx-post=(format!("/reconcile/{}/link", session_id))
+                hx-swap="none" {}
 
             // ── Toolbar ──
             div class="reconcile-toolbar" {
@@ -1502,7 +1504,9 @@ pub async fn reconcile_detail(
                                     }
                                     span class="txn-amount" { (utils::format_cents(o.amount)) }
                                     button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match" }
-                                    form method="post" action=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form" {
+                                    form method="post" action=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form"
+                                        hx-post=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id))
+                                        hx-swap="none" {
                                         input type="hidden" name="sort" value=(sort.to_string()) {}
                                         button type="submit" class="btn-ignore" { "Ignore" }
                                     }
@@ -1533,7 +1537,9 @@ pub async fn reconcile_detail(
                                         span class="txn-vendor" { (r.vendor) }
                                     }
                                     span class="txn-amount" { (utils::format_cents(r.amount)) }
-                                    form method="post" action=(format!("/reconcile/{}/ignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form" {
+                                    form method="post" action=(format!("/reconcile/{}/ignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form"
+                                        hx-post=(format!("/reconcile/{}/ignore-reconciled/{}", session_id, r.txn_id))
+                                        hx-swap="none" {
                                         input type="hidden" name="sort" value=(sort.to_string()) {}
                                         button type="submit" class="btn-ignore" { "Ignore" }
                                     }
@@ -1672,7 +1678,9 @@ pub async fn reconcile_detail(
                                         span class="txn-vendor" { (o.vendor) }
                                     }
                                     span class="txn-amount" { (utils::format_cents(o.amount)) }
-                                    form method="post" action=(format!("/reconcile/{}/unignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form" {
+                                    form method="post" action=(format!("/reconcile/{}/unignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form"
+                                        hx-post=(format!("/reconcile/{}/unignore-outgoing/{}", session_id, o.txn_id))
+                                        hx-swap="none" {
                                         button type="submit" class="btn-undo" { "Undo" }
                                     }
                                 }
@@ -1701,7 +1709,9 @@ pub async fn reconcile_detail(
                                         span class="txn-vendor" { (r.vendor) }
                                     }
                                     span class="txn-amount" { (utils::format_cents(r.amount)) }
-                                    form method="post" action=(format!("/reconcile/{}/unignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form" {
+                                    form method="post" action=(format!("/reconcile/{}/unignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form"
+                                        hx-post=(format!("/reconcile/{}/unignore-reconciled/{}", session_id, r.txn_id))
+                                        hx-swap="none" {
                                         button type="submit" class="btn-undo" { "Undo" }
                                     }
                                 }
@@ -1804,7 +1814,7 @@ pub async fn link_txns(
     State(state): State<AppState>,
     user: LoggedInUser,
     body: axum::body::Bytes,
-) -> Result<axum::response::Redirect, AppError> {
+) -> Result<axum::http::StatusCode, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
     let mut outgoing_id: Option<Uuid> = None;
@@ -1837,10 +1847,7 @@ pub async fn link_txns(
     for reconciled_id in reconciled_ids {
         reconcile::link_transactions(&state.db().await, outgoing_id, reconciled_id).await?;
     }
-    Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}",
-        session_id
-    )))
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 #[derive(serde::Deserialize)]
@@ -1897,13 +1904,10 @@ pub async fn ignore_outgoing(
     State(state): State<AppState>,
     user: LoggedInUser,
     axum::Form(_form): axum::Form<SortQuery>,
-) -> Result<axum::response::Redirect, AppError> {
+) -> Result<axum::http::StatusCode, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     reconcile::ignore_outgoing(&state.db().await, txn_id).await?;
-    Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}#unreconciled-section",
-        session_id
-    )))
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 pub async fn ignore_reconciled(
@@ -1911,39 +1915,30 @@ pub async fn ignore_reconciled(
     State(state): State<AppState>,
     user: LoggedInUser,
     axum::Form(_form): axum::Form<SortQuery>,
-) -> Result<axum::response::Redirect, AppError> {
+) -> Result<axum::http::StatusCode, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     reconcile::ignore_reconciled(&state.db().await, txn_id).await?;
-    Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}#unreconciled-section",
-        session_id
-    )))
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 pub async fn unignore_outgoing(
     Path((session_id, txn_id)): Path<(Uuid, Uuid)>,
     State(state): State<AppState>,
     user: LoggedInUser,
-) -> Result<axum::response::Redirect, AppError> {
+) -> Result<axum::http::StatusCode, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     reconcile::unignore_outgoing(&state.db().await, txn_id).await?;
-    Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}#unreconciled-section",
-        session_id
-    )))
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 pub async fn unignore_reconciled(
     Path((session_id, txn_id)): Path<(Uuid, Uuid)>,
     State(state): State<AppState>,
     user: LoggedInUser,
-) -> Result<axum::response::Redirect, AppError> {
+) -> Result<axum::http::StatusCode, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     reconcile::unignore_reconciled(&state.db().await, txn_id).await?;
-    Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}#unreconciled-section",
-        session_id
-    )))
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 pub async fn auto_match(
