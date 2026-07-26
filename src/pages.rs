@@ -1322,6 +1322,7 @@ pub async fn reconcile_delete(
 #[derive(serde::Deserialize)]
 pub struct SortQuery {
     pub sort: Option<reconcile::SortOrder>,
+    pub scroll_to: Option<usize>,
 }
 
 pub async fn reconcile_detail(
@@ -1564,7 +1565,7 @@ pub async fn reconcile_detail(
                 // ── Unmatched pairs: outgoing left, reconciled right ──
                 @for i in 0..unmatched_max {
                     @if let Some(o) = unmatched_outgoing.get(i) {
-                        div class="reconcile-txn reconcile-txn--unmatched" {
+                        div class="reconcile-txn reconcile-txn--unmatched" id=(format!("unmatched-out-{}", i)) {
                             div class="txn-row" {
                                 span class="txn-date" { (utils::format_date(o.date)) }
                                 @if !o.vendor.is_empty() {
@@ -1573,6 +1574,7 @@ pub async fn reconcile_detail(
                                 span class="txn-amount" { (utils::format_cents(o.amount)) }
                                 button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match" }
                                 form method="post" action=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form" {
+                                    input type="hidden" name="sort" value=(sort.to_string()) {}
                                     button type="submit" class="btn-ignore" { "Ignore" }
                                 }
                             }
@@ -1591,10 +1593,10 @@ pub async fn reconcile_detail(
                             }
                         }
                     } @else {
-                        div class="reconcile-grid-spacer" {}
+                        div class="reconcile-grid-spacer" id=(format!("unmatched-out-{}", i)) {}
                     }
                     @if let Some(r) = unmatched_reconciled.get(i) {
-                        div class="reconcile-txn reconcile-txn--unmatched" {
+                        div class="reconcile-txn reconcile-txn--unmatched" id=(format!("unmatched-rec-{}", i)) {
                             div class="txn-row" {
                                 input type="checkbox" name="reconciled_ids" value=(r.txn_id) form="reconcile-match-form" class="txn-card-checkbox" {}
                                 span class="txn-date" { (utils::format_date(r.date)) }
@@ -1603,6 +1605,7 @@ pub async fn reconcile_detail(
                                 }
                                 span class="txn-amount" { (utils::format_cents(r.amount)) }
                                 form method="post" action=(format!("/reconcile/{}/ignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form" {
+                                    input type="hidden" name="sort" value=(sort.to_string()) {}
                                     button type="submit" class="btn-ignore" { "Ignore" }
                                 }
                             }
@@ -1621,7 +1624,7 @@ pub async fn reconcile_detail(
                             }
                         }
                     } @else {
-                        div class="reconcile-grid-spacer" {}
+                        div class="reconcile-grid-spacer" id=(format!("unmatched-rec-{}", i)) {}
                     }
                 }
             }
@@ -1796,12 +1799,21 @@ pub async fn ignore_outgoing(
     Path((session_id, txn_id)): Path<(Uuid, Uuid)>,
     State(state): State<AppState>,
     user: LoggedInUser,
+    axum::Form(form): axum::Form<SortQuery>,
 ) -> Result<axum::response::Redirect, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    // Find the index of this txn in the unmatched list before ignoring it
+    let sort = form.sort.unwrap_or_default();
+    let outgoing = reconcile::list_outgoing(&state.db().await, session_id, sort).await?;
+    let idx = outgoing
+        .iter()
+        .filter(|o| !o.matched)
+        .position(|o| o.txn_id == txn_id);
     reconcile::ignore_outgoing(&state.db().await, txn_id).await?;
+    let anchor = idx.map_or(String::new(), |i| format!("#unmatched-out-{}", i));
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}#reconcile-top",
-        session_id
+        "/reconcile/{}{}",
+        session_id, anchor
     )))
 }
 
@@ -1809,12 +1821,21 @@ pub async fn ignore_reconciled(
     Path((session_id, txn_id)): Path<(Uuid, Uuid)>,
     State(state): State<AppState>,
     user: LoggedInUser,
+    axum::Form(form): axum::Form<SortQuery>,
 ) -> Result<axum::response::Redirect, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    // Find the index of this txn in the unmatched list before ignoring it
+    let sort = form.sort.unwrap_or_default();
+    let reconciled = reconcile::list_reconciled(&state.db().await, session_id, sort).await?;
+    let idx = reconciled
+        .iter()
+        .filter(|r| !r.matched)
+        .position(|r| r.txn_id == txn_id);
     reconcile::ignore_reconciled(&state.db().await, txn_id).await?;
+    let anchor = idx.map_or(String::new(), |i| format!("#unmatched-rec-{}", i));
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}#reconcile-top",
-        session_id
+        "/reconcile/{}{}",
+        session_id, anchor
     )))
 }
 
