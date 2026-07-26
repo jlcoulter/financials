@@ -1106,57 +1106,6 @@ pub async fn insights_chart(
         .render(&trend_chart)
         .unwrap_or_else(|_| "<p>Trend chart rendering failed</p>".to_string());
 
-    // Chart B: Cash Flow (grouped bar — positive = income, negative = expenses)
-    // Compute per-date totals for inflows vs outflows
-    let mut inflow: Vec<f64> = vec![0.0; dates.len()];
-    let mut outflow: Vec<f64> = vec![0.0; dates.len()];
-    for (i, name) in item_names.iter().enumerate() {
-        let item = items.iter().find(|it| &it.name == name).unwrap();
-        for (j, &val) in values[i].iter().enumerate() {
-            if item.item_type == "debt" {
-                outflow[j] += val.abs();
-            } else {
-                inflow[j] += val;
-            }
-        }
-    }
-
-    use charming::series::Bar;
-    let mut flow_chart = Chart::new()
-        .background_color("#0f172a")
-        .title(
-            Title::new()
-                .text(format!("{} — Cash Flow", portfolio_name))
-                .text_style(white_text.clone()),
-        )
-        .tooltip(Tooltip::new().trigger(Trigger::Axis))
-        .legend(
-            Legend::new()
-                .data(vec!["Income".to_string(), "Expenses".to_string()])
-                .text_style(white_text.clone())
-                .top("30"),
-        )
-        .x_axis(
-            Axis::new()
-                .type_(AxisType::Category)
-                .data(dates.clone())
-                .axis_label(white_axis_label.clone()),
-        )
-        .y_axis(
-            Axis::new()
-                .type_(AxisType::Value)
-                .axis_label(white_axis_label.clone()),
-        );
-
-    flow_chart = flow_chart
-        .series(Bar::new().name("Income").data(inflow))
-        .series(Bar::new().name("Expenses").data(outflow));
-
-    let flow_html = HtmlRenderer::new("flow-chart", 900, 400)
-        .theme(Theme::Dark)
-        .render(&flow_chart)
-        .unwrap_or_else(|_| "<p>Flow chart rendering failed</p>".to_string());
-
     // Chart C: Asset Allocation (donut pie)
     // Compute latest values per item (use last non-zero, or last date's value)
     let mut pie_data: Vec<(String, f64)> = Vec::new();
@@ -1220,7 +1169,6 @@ pub async fn insights_chart(
     }
 
     let trend_html = make_chart_id(&trend_html, "trend-chart");
-    let flow_html = make_chart_id(&flow_html, "flow-chart");
     let pie_html = make_chart_id(&pie_html, "pie-chart");
 
     Ok(layout(
@@ -1234,9 +1182,6 @@ pub async fn insights_chart(
             }
             div class="insights-chart-section" {
                 (maud::PreEscaped(trend_html))
-            }
-            div class="insights-chart-section" {
-                (maud::PreEscaped(flow_html))
             }
             div class="insights-chart-section" {
                 (maud::PreEscaped(pie_html))
