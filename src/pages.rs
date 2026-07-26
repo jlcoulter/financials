@@ -1860,69 +1860,107 @@ async fn render_proposals_page(
 
             h2 { "Auto-Match Proposals" }
 
-            @if proposals.is_empty() {
+            @if proposals.is_empty() && skip_ids.is_empty() {
                 p { "No matches found." }
                 a href=(format!("/reconcile/{}", session_id)) { "← Back to reconcile" }
             } @else {
-                p { (format!("Found {} proposed match(es). Review and confirm or reject each.", proposals.len())) }
+                @if !proposals.is_empty() {
+                    p { (format!("Found {} proposed match(es). Review and confirm or reject each.", proposals.len())) }
 
-                form method="post" action=(format!("/reconcile/{}/confirm-all", session_id)) {
-                    @for sid in skip_ids {
-                        input type="hidden" name="skip_ids" value=(sid) {}
+                    form method="post" action=(format!("/reconcile/{}/confirm-all", session_id)) {
+                        @for sid in skip_ids {
+                            input type="hidden" name="skip_ids" value=(sid) {}
+                        }
+                        button type="submit" class="btn" { "Confirm All" }
+                        " "
+                        a href=(format!("/reconcile/{}", session_id)) class="btn btn-ghost" { "Cancel" }
                     }
-                    button type="submit" class="btn" { "Confirm All" }
-                    " "
-                    a href=(format!("/reconcile/{}", session_id)) class="btn btn-ghost" { "Cancel" }
-                }
 
-                div class="reconcile-grid" style="margin-top:1rem" {
-                    div class="reconcile-grid-header" { "Outgoing" }
-                    div class="reconcile-grid-header" { "Reconciled" }
+                    div class="reconcile-grid" style="margin-top:1rem" {
+                        div class="reconcile-grid-header" { "Outgoing" }
+                        div class="reconcile-grid-header" { "Reconciled" }
 
-                    @for p in &proposals {
-                        @if let Some(o) = outgoing.iter().find(|x| x.txn_id == p.outgoing_id) {
-                            @let row_span = p.reconciled_ids.len().max(1);
-                            @let is_exact = p.reconciled_ids.len() == 1;
-                            @let txn_class = if is_exact { "reconcile-txn reconcile-txn--exact-match" } else { "reconcile-txn reconcile-txn--proposed" };
-                            div class=(txn_class) style=(format!("grid-row: span {}", row_span)) {
-                                div class="txn-row" {
-                                    span class="txn-date" { (utils::format_date(o.date)) }
-                                    @if !o.vendor.is_empty() {
-                                        span class="txn-vendor" { (o.vendor) }
-                                    }
-                                    span class="txn-amount" { (utils::format_cents(o.amount)) }
-                                    @if is_exact {
-                                        span class="txn-confidence" { "Exact match" }
-                                    }
-                                    form method="post" action=(format!("/reconcile/{}/confirm", session_id)) class="txn-unlink-form" style="display:inline" {
-                                        input type="hidden" name="outgoing_id" value=(o.txn_id) {}
-                                        @for rid in &p.reconciled_ids {
-                                            input type="hidden" name="reconciled_ids" value=(rid) {}
+                        @for p in &proposals {
+                            @if let Some(o) = outgoing.iter().find(|x| x.txn_id == p.outgoing_id) {
+                                @let row_span = p.reconciled_ids.len().max(1);
+                                @let is_exact = p.reconciled_ids.len() == 1;
+                                @let txn_class = if is_exact { "reconcile-txn reconcile-txn--exact-match" } else { "reconcile-txn reconcile-txn--proposed" };
+                                div class=(txn_class) style=(format!("grid-row: span {}", row_span)) {
+                                    div class="txn-row" {
+                                        span class="txn-date" { (utils::format_date(o.date)) }
+                                        @if !o.vendor.is_empty() {
+                                            span class="txn-vendor" { (o.vendor) }
                                         }
-                                        @for sid in skip_ids {
-                                            input type="hidden" name="skip_ids" value=(sid) {}
+                                        span class="txn-amount" { (utils::format_cents(o.amount)) }
+                                        @if is_exact {
+                                            span class="txn-confidence" { "Exact match" }
                                         }
-                                        button type="submit" class="btn btn-sm" { "Confirm" }
+                                        form method="post" action=(format!("/reconcile/{}/confirm", session_id)) class="txn-unlink-form" style="display:inline" {
+                                            input type="hidden" name="outgoing_id" value=(o.txn_id) {}
+                                            @for rid in &p.reconciled_ids {
+                                                input type="hidden" name="reconciled_ids" value=(rid) {}
+                                            }
+                                            @for sid in skip_ids {
+                                                input type="hidden" name="skip_ids" value=(sid) {}
+                                            }
+                                            button type="submit" class="btn btn-sm" { "Confirm" }
+                                        }
+                                        form method="post" action=(format!("/reconcile/{}/reject", session_id)) class="txn-unlink-form" style="display:inline" {
+                                            input type="hidden" name="outgoing_id" value=(o.txn_id) {}
+                                            @for sid in skip_ids {
+                                                input type="hidden" name="skip_ids" value=(sid) {}
+                                            }
+                                            button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Reject" }
+                                        }
                                     }
-                                    form method="post" action=(format!("/reconcile/{}/reject", session_id)) class="txn-unlink-form" style="display:inline" {
-                                        input type="hidden" name="outgoing_id" value=(o.txn_id) {}
-                                        @for sid in skip_ids {
-                                            input type="hidden" name="skip_ids" value=(sid) {}
+                                }
+                                @for rid in &p.reconciled_ids {
+                                    @if let Some(r) = reconciled.iter().find(|x| x.txn_id == *rid) {
+                                        div class=(txn_class) {
+                                            div class="txn-row" {
+                                                span class="txn-date" { (utils::format_date(r.date)) }
+                                                @if !r.vendor.is_empty() {
+                                                    span class="txn-vendor" { (r.vendor) }
+                                                }
+                                                span class="txn-amount" { (utils::format_cents(r.amount)) }
+                                            }
                                         }
-                                        button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Reject" }
                                     }
                                 }
                             }
-                            @for rid in &p.reconciled_ids {
-                                @if let Some(r) = reconciled.iter().find(|x| x.txn_id == *rid) {
-                                    div class=(txn_class) {
-                                        div class="txn-row" {
-                                            span class="txn-date" { (utils::format_date(r.date)) }
-                                            @if !r.vendor.is_empty() {
-                                                span class="txn-vendor" { (r.vendor) }
-                                            }
-                                            span class="txn-amount" { (utils::format_cents(r.amount)) }
+                        }
+                    }
+                }
+
+                @if !skip_ids.is_empty() {
+                    @let rejected_outgoing: Vec<&reconcile::OutgoingTxn> = outgoing.iter().filter(|o| skip_ids.contains(&o.txn_id)).collect();
+                    @if !rejected_outgoing.is_empty() {
+                        h3 style="margin-top:2rem" { "Rejected Proposals" }
+                        p { "These proposals were rejected. Click Undo to return them to the proposals list." }
+                        div class="reconcile-grid" {
+                            div class="reconcile-grid-header" { "Outgoing" }
+                            div class="reconcile-grid-header" { "Reconciled" }
+                            @for o in &rejected_outgoing {
+                                div class="reconcile-txn reconcile-txn--rejected" {
+                                    div class="txn-row" {
+                                        span class="txn-date" { (utils::format_date(o.date)) }
+                                        @if !o.vendor.is_empty() {
+                                            span class="txn-vendor" { (o.vendor) }
                                         }
+                                        span class="txn-amount" { (utils::format_cents(o.amount)) }
+                                        form method="post" action=(format!("/reconcile/{}/undo-reject/{}", session_id, o.txn_id)) class="txn-unlink-form" style="display:inline" {
+                                            @for sid in skip_ids {
+                                                @if *sid != o.txn_id {
+                                                    input type="hidden" name="skip_ids" value=(sid) {}
+                                                }
+                                            }
+                                            button type="submit" class="btn btn-sm" { "Undo" }
+                                        }
+                                    }
+                                }
+                                div class="reconcile-txn reconcile-txn--rejected" {
+                                    div class="txn-row" {
+                                        span { "Rejected" }
                                     }
                                 }
                             }
@@ -2044,6 +2082,27 @@ pub async fn reject_proposal(
     }
     if let Some(id) = rejected_id {
         skip_ids.push(id);
+    }
+    render_proposals_page(session_id, state, user, &skip_ids).await
+}
+
+pub async fn undo_reject(
+    Path((session_id, outgoing_id)): Path<(Uuid, Uuid)>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    body: axum::body::Bytes,
+) -> Result<maud::Markup, AppError> {
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    let body_str = String::from_utf8_lossy(&body);
+    let mut skip_ids: Vec<Uuid> = Vec::new();
+    for pair in body_str.split('&') {
+        if let Some((key, val)) = pair.split_once('=')
+            && key == "skip_ids"
+            && let Ok(id) = val.parse()
+            && id != outgoing_id
+        {
+            skip_ids.push(id);
+        }
     }
     render_proposals_page(session_id, state, user, &skip_ids).await
 }

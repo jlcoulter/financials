@@ -366,6 +366,10 @@ fn app(state: AppState, static_dir: String) -> Router {
             "/reconcile/{id}/reject",
             axum::routing::post(pages::reject_proposal),
         )
+        .route(
+            "/reconcile/{id}/undo-reject/{outgoing_id}",
+            axum::routing::post(pages::undo_reject),
+        )
         .nest_service("/static", ServeDir::new(static_dir))
         .fallback(pages::not_found)
         .with_state(state)
