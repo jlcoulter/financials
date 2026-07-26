@@ -1,19 +1,16 @@
 services:
-  app:
-    build: .
+  financials:
+    image: ghcr.io/jlcoulter/financials
     ports:
       - "3000:3000"
     volumes:
       - data:/data
-      - config:/config
     environment:
       - DATABASE_URL=sqlite:///data/data.db
       - DB_PATH=/data/data.db
-      - CONFIG_DIR=/config
       - STATIC_DIR=/app/static
       - RUST_LOG=financials=debug
     restart: unless-stopped
 
 volumes:
   data:
-  config:
