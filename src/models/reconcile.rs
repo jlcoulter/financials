@@ -362,23 +362,36 @@ pub async fn link_transactions(
     outgoing_id: Uuid,
     reconciled_id: Uuid,
 ) -> Result<(), AppError> {
-    let id = Uuid::now_v7();
-    sqlx::query("INSERT INTO match_links (match_id, outgoing_id, reconciled_id) VALUES (?, ?, ?)")
+    // Check if this link already exists
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM match_links WHERE outgoing_id = ? AND reconciled_id = ?)",
+    )
+    .bind(outgoing_id.to_string())
+    .bind(reconciled_id.to_string())
+    .fetch_one(pool)
+    .await?;
+
+    if !exists {
+        let id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO match_links (match_id, outgoing_id, reconciled_id) VALUES (?, ?, ?)",
+        )
         .bind(id.to_string())
         .bind(outgoing_id.to_string())
         .bind(reconciled_id.to_string())
         .execute(pool)
         .await?;
 
-    // Mark both as matched
-    sqlx::query("UPDATE outgoing_txns SET matched = TRUE WHERE txn_id = ?")
-        .bind(outgoing_id.to_string())
-        .execute(pool)
-        .await?;
-    sqlx::query("UPDATE reconciled_txns SET matched = TRUE WHERE txn_id = ?")
-        .bind(reconciled_id.to_string())
-        .execute(pool)
-        .await?;
+        // Mark both as matched
+        sqlx::query("UPDATE outgoing_txns SET matched = TRUE WHERE txn_id = ?")
+            .bind(outgoing_id.to_string())
+            .execute(pool)
+            .await?;
+        sqlx::query("UPDATE reconciled_txns SET matched = TRUE WHERE txn_id = ?")
+            .bind(reconciled_id.to_string())
+            .execute(pool)
+            .await?;
+    }
 
     Ok(())
 }
@@ -467,6 +480,110 @@ pub async fn ignore_reconciled(pool: &SqlitePool, txn_id: Uuid) -> Result<(), Ap
         .execute(pool)
         .await?;
     Ok(())
+}
+
+pub async fn unignore_outgoing(pool: &SqlitePool, txn_id: Uuid) -> Result<(), AppError> {
+    sqlx::query("UPDATE outgoing_txns SET ignored = FALSE WHERE txn_id = ?")
+        .bind(txn_id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn unignore_reconciled(pool: &SqlitePool, txn_id: Uuid) -> Result<(), AppError> {
+    sqlx::query("UPDATE reconciled_txns SET ignored = FALSE WHERE txn_id = ?")
+        .bind(txn_id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn list_ignored_outgoing(
+    pool: &SqlitePool,
+    session_id: Uuid,
+    sort: SortOrder,
+) -> Result<Vec<OutgoingTxn>, AppError> {
+    let rows = match sort {
+        SortOrder::Date => {
+            sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+                "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM outgoing_txns WHERE session_id = ? AND deleted_at IS NULL AND ignored = TRUE ORDER BY date DESC, created_at DESC",
+            )
+            .bind(session_id.to_string())
+            .fetch_all(pool)
+            .await?
+        }
+        SortOrder::Amount => {
+            sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+                "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM outgoing_txns WHERE session_id = ? AND deleted_at IS NULL AND ignored = TRUE ORDER BY amount DESC, date, created_at",
+            )
+            .bind(session_id.to_string())
+            .fetch_all(pool)
+            .await?
+        }
+    };
+
+    rows.into_iter()
+        .map(
+            |(id_str, sid_str, date_str, amount, vendor, matched, ignored, metadata_str)| {
+                let metadata: HashMap<String, String> =
+                    serde_json::from_str(&metadata_str).unwrap_or_default();
+                Ok(OutgoingTxn {
+                    txn_id: Uuid::parse_str(&id_str)?,
+                    session_id: Uuid::parse_str(&sid_str)?,
+                    date: NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")?,
+                    amount,
+                    vendor,
+                    matched,
+                    ignored,
+                    metadata,
+                })
+            },
+        )
+        .collect()
+}
+
+pub async fn list_ignored_reconciled(
+    pool: &SqlitePool,
+    session_id: Uuid,
+    sort: SortOrder,
+) -> Result<Vec<ReconciledTxn>, AppError> {
+    let rows = match sort {
+        SortOrder::Date => {
+            sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+                "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM reconciled_txns WHERE session_id = ? AND deleted_at IS NULL AND ignored = TRUE ORDER BY date DESC, created_at DESC",
+            )
+            .bind(session_id.to_string())
+            .fetch_all(pool)
+            .await?
+        }
+        SortOrder::Amount => {
+            sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+                "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM reconciled_txns WHERE session_id = ? AND deleted_at IS NULL AND ignored = TRUE ORDER BY amount DESC, date, created_at",
+            )
+            .bind(session_id.to_string())
+            .fetch_all(pool)
+            .await?
+        }
+    };
+
+    rows.into_iter()
+        .map(
+            |(id_str, sid_str, date_str, amount, vendor, matched, ignored, metadata_str)| {
+                let metadata: HashMap<String, String> =
+                    serde_json::from_str(&metadata_str).unwrap_or_default();
+                Ok(ReconciledTxn {
+                    txn_id: Uuid::parse_str(&id_str)?,
+                    session_id: Uuid::parse_str(&sid_str)?,
+                    date: NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")?,
+                    amount,
+                    vendor,
+                    matched,
+                    ignored,
+                    metadata,
+                })
+            },
+        )
+        .collect()
 }
 
 /// Auto-match: for each unmatched outgoing, find a single unmatched reconciled txn

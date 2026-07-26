@@ -355,6 +355,14 @@ fn app(state: AppState, static_dir: String) -> Router {
             axum::routing::post(pages::ignore_reconciled),
         )
         .route(
+            "/reconcile/{id}/unignore-outgoing/{txn_id}",
+            axum::routing::post(pages::unignore_outgoing),
+        )
+        .route(
+            "/reconcile/{id}/unignore-reconciled/{txn_id}",
+            axum::routing::post(pages::unignore_reconciled),
+        )
+        .route(
             "/reconcile/{id}/confirm",
             axum::routing::post(pages::confirm_proposal),
         )

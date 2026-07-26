@@ -805,6 +805,17 @@ th.th--debt {
     opacity: 0.85;
 }
 
+.reconcile-txn--ignored {
+    border-left: 4px solid var(--muted);
+    opacity: 0.6;
+}
+
+.reconcile-empty {
+    color: var(--muted);
+    font-style: italic;
+    margin: 0.5rem 0;
+}
+
 .reconcile-txn--proposed {
     border-left: 4px solid #f59e0b;
     background: color-mix(in srgb, #f59e0b 8%, var(--card));
@@ -950,6 +961,22 @@ th.th--debt {
 .btn-ignore:hover {
     border-color: #dc2626;
     color: #dc2626;
+}
+
+.btn-undo {
+    background: none;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 2px 6px;
+    font-size: 0.7rem;
+    cursor: pointer;
+    border-radius: 3px;
+    margin-left: 4px;
+}
+
+.btn-undo:hover {
+    background: var(--accent);
+    color: #fff;
 }
 
 .txn-ignore-form {
