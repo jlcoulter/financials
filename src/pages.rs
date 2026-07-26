@@ -1629,7 +1629,10 @@ fn render_reconcile_sections(
                                             }
                                         }
                                     }
-                                    form method="post" action=(format!("/reconcile/{}/unlink", session_id)) class="txn-unlink-form" {
+                                    form method="post" action=(format!("/reconcile/{}/unlink", session_id)) class="txn-unlink-form"
+                                        hx-post=(format!("/reconcile/{}/unlink", session_id))
+                                        hx-target="#reconcile-sections"
+                                        hx-swap="outerHTML" {
                                         input type="hidden" name="outgoing_id" value=(o.txn_id) {}
                                         button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Unmatch" }
                                     }
@@ -1657,7 +1660,10 @@ fn render_reconcile_sections(
                                                 span class="txn-vendor" { (r.vendor) }
                                             }
                                             span class="txn-amount" { (utils::format_cents(r.amount)) }
-                                            form method="post" action=(format!("/reconcile/{}/unlink-reconciled", session_id)) class="txn-unlink-form" {
+                                            form method="post" action=(format!("/reconcile/{}/unlink-reconciled", session_id)) class="txn-unlink-form"
+                                                hx-post=(format!("/reconcile/{}/unlink-reconciled", session_id))
+                                                hx-target="#reconcile-sections"
+                                                hx-swap="outerHTML" {
                                                 input type="hidden" name="reconciled_id" value=(r.txn_id) {}
                                                 button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Unmatch" }
                                             }
@@ -1891,7 +1897,7 @@ pub async fn unlink_txns(
     State(state): State<AppState>,
     user: LoggedInUser,
     axum::Form(form): axum::Form<UnlinkForm>,
-) -> Result<axum::response::Redirect, AppError> {
+) -> Result<maud::Markup, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let outgoing_id = Uuid::parse_str(&form.outgoing_id)
         .map_err(|_| AppError::BadRequest("Invalid outgoing ID".into()))?;
@@ -1900,10 +1906,12 @@ pub async fn unlink_txns(
     for m in matches.iter().filter(|m| m.outgoing_id == outgoing_id) {
         reconcile::unlink_transaction(&state.db().await, m.match_id).await?;
     }
-    Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}",
-        session_id
-    )))
+    render_sections(
+        session_id,
+        reconcile::SortOrder::default(),
+        &state.db().await,
+    )
+    .await
 }
 
 #[derive(serde::Deserialize)]
@@ -1916,7 +1924,7 @@ pub async fn unlink_reconciled_txns(
     State(state): State<AppState>,
     user: LoggedInUser,
     axum::Form(form): axum::Form<UnlinkReconciledForm>,
-) -> Result<axum::response::Redirect, AppError> {
+) -> Result<maud::Markup, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let reconciled_id = Uuid::parse_str(&form.reconciled_id)
         .map_err(|_| AppError::BadRequest("Invalid reconciled ID".into()))?;
@@ -1924,10 +1932,12 @@ pub async fn unlink_reconciled_txns(
     for m in matches.iter().filter(|m| m.reconciled_id == reconciled_id) {
         reconcile::unlink_transaction(&state.db().await, m.match_id).await?;
     }
-    Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}#reconcile-top",
-        session_id
-    )))
+    render_sections(
+        session_id,
+        reconcile::SortOrder::default(),
+        &state.db().await,
+    )
+    .await
 }
 
 pub async fn ignore_outgoing(
