@@ -113,6 +113,7 @@ docker run -p 3000:3000 \
 | `STATIC_DIR` | `src/static` | Directory for static assets |
 | `SECURE_COOKIES` | `false` | Set to `true` or `1` to add `Secure` + `SameSite=Lax` flags to the session cookie. Enable when running behind TLS (e.g. reverse proxy with HTTPS). Leave off for local/home-lab HTTP deployments. |
 | `RUST_LOG` | `financials=debug` | Log level (e.g. `RUST_LOG=financials=info` for quieter output) |
+| `BROWSER` | — | Browser executable to use when auto-opening the app on startup (e.g. `firefox`, `chromium`). The `webbrowser` crate falls back to `xdg-open` if unset. Set to a no-op like `/bin/true` to suppress the "failed to open browser" warning in headless environments. |
 
 ### Backup configuration
 
