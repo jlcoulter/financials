@@ -1336,6 +1336,10 @@ pub async fn reconcile_detail(
     let outgoing = reconcile::list_outgoing(&state.db().await, session_id, sort).await?;
     let reconciled = reconcile::list_reconciled(&state.db().await, session_id, sort).await?;
     let matches = reconcile::list_matches(&state.db().await, session_id).await?;
+    let ignored_outgoing =
+        reconcile::list_ignored_outgoing(&state.db().await, session_id, sort).await?;
+    let ignored_reconciled =
+        reconcile::list_ignored_reconciled(&state.db().await, session_id, sort).await?;
 
     // Build lookup: outgoing_id -> list of reconciled_ids
     let mut match_map: std::collections::HashMap<Uuid, Vec<Uuid>> =
@@ -1357,6 +1361,9 @@ pub async fn reconcile_detail(
     let unmatched_reconciled: Vec<&ReconciledTxn> =
         reconciled.iter().filter(|r| !r.matched).collect();
     let unmatched_max = unmatched_outgoing.len().max(unmatched_reconciled.len());
+
+    let matched_outgoing: Vec<&OutgoingTxn> = outgoing.iter().filter(|o| o.matched).collect();
+    let ignored_max = ignored_outgoing.len().max(ignored_reconciled.len());
 
     Ok(layout(
         &format!("Reconcile — {}", name),
@@ -1474,14 +1481,96 @@ pub async fn reconcile_detail(
                 }
             }
 
-            div class="reconcile-grid" {
-                // ── Header row ──
-                div class="reconcile-grid-header" { "Outgoing" }
-                div class="reconcile-grid-header" { "Reconciled" }
+            // ════════════════════════════════════════════════════════════════
+            // SECTION 1: Un-reconciled
+            // ════════════════════════════════════════════════════════════════
+            h2 id="unreconciled-section" { "Un-reconciled" }
+            @if unmatched_outgoing.is_empty() && unmatched_reconciled.is_empty() {
+                p class="reconcile-empty" { "All transactions have been reconciled or ignored." }
+            } @else {
+                div class="reconcile-grid" {
+                    div class="reconcile-grid-header" { "Outgoing" }
+                    div class="reconcile-grid-header" { "Reconciled" }
 
-                // ── Matched pairs: outgoing on left, its reconciled stack on right ──
-                @for o in &outgoing {
-                    @if o.matched {
+                    @for i in 0..unmatched_max {
+                        @if let Some(o) = unmatched_outgoing.get(i) {
+                            div class="reconcile-txn reconcile-txn--unmatched" id=(format!("unmatched-out-{}", i)) {
+                                div class="txn-row" {
+                                    span class="txn-date" { (utils::format_date(o.date)) }
+                                    @if !o.vendor.is_empty() {
+                                        span class="txn-vendor" { (o.vendor) }
+                                    }
+                                    span class="txn-amount" { (utils::format_cents(o.amount)) }
+                                    button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match" }
+                                    form method="post" action=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form" {
+                                        input type="hidden" name="sort" value=(sort.to_string()) {}
+                                        button type="submit" class="btn-ignore" { "Ignore" }
+                                    }
+                                }
+                                @if !o.metadata.is_empty() {
+                                    details class="txn-metadata" {
+                                        summary { "Metadata" }
+                                        table {
+                                            @for (key, val) in &o.metadata {
+                                                tr {
+                                                    td class="txn-metadata-key" { (key) }
+                                                    td { (val) }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } @else {
+                            div class="reconcile-grid-spacer" id=(format!("unmatched-out-{}", i)) {}
+                        }
+                        @if let Some(r) = unmatched_reconciled.get(i) {
+                            div class="reconcile-txn reconcile-txn--unmatched" id=(format!("unmatched-rec-{}", i)) {
+                                div class="txn-row" {
+                                    input type="checkbox" name="reconciled_ids" value=(r.txn_id) form="reconcile-match-form" class="txn-card-checkbox" {}
+                                    span class="txn-date" { (utils::format_date(r.date)) }
+                                    @if !r.vendor.is_empty() {
+                                        span class="txn-vendor" { (r.vendor) }
+                                    }
+                                    span class="txn-amount" { (utils::format_cents(r.amount)) }
+                                    form method="post" action=(format!("/reconcile/{}/ignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form" {
+                                        input type="hidden" name="sort" value=(sort.to_string()) {}
+                                        button type="submit" class="btn-ignore" { "Ignore" }
+                                    }
+                                }
+                                @if !r.metadata.is_empty() {
+                                    details class="txn-metadata" {
+                                        summary { "Metadata" }
+                                        table {
+                                            @for (key, val) in &r.metadata {
+                                                tr {
+                                                    td class="txn-metadata-key" { (key) }
+                                                    td { (val) }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } @else {
+                            div class="reconcile-grid-spacer" id=(format!("unmatched-rec-{}", i)) {}
+                        }
+                    }
+                }
+            }
+
+            // ════════════════════════════════════════════════════════════════
+            // SECTION 2: Matched
+            // ════════════════════════════════════════════════════════════════
+            h2 id="matched-section" { "Matched" }
+            @if matched_outgoing.is_empty() {
+                p class="reconcile-empty" { "No matched transactions yet." }
+            } @else {
+                div class="reconcile-grid" {
+                    div class="reconcile-grid-header" { "Outgoing" }
+                    div class="reconcile-grid-header" { "Reconciled" }
+
+                    @for o in &matched_outgoing {
                         @if let Some(linked_ids) = match_map.get(&o.txn_id) {
                             @let row_span = linked_ids.len().max(1);
                             div class="reconcile-txn reconcile-txn--matched" style=(format!("grid-row: span {}", row_span)) {
@@ -1561,70 +1650,78 @@ pub async fn reconcile_detail(
                         }
                     }
                 }
+            }
 
-                // ── Unmatched pairs: outgoing left, reconciled right ──
-                @for i in 0..unmatched_max {
-                    @if let Some(o) = unmatched_outgoing.get(i) {
-                        div class="reconcile-txn reconcile-txn--unmatched" id=(format!("unmatched-out-{}", i)) {
-                            div class="txn-row" {
-                                span class="txn-date" { (utils::format_date(o.date)) }
-                                @if !o.vendor.is_empty() {
-                                    span class="txn-vendor" { (o.vendor) }
+            // ════════════════════════════════════════════════════════════════
+            // SECTION 3: Ignored
+            // ════════════════════════════════════════════════════════════════
+            h2 id="ignored-section" { "Ignored" }
+            @if ignored_outgoing.is_empty() && ignored_reconciled.is_empty() {
+                p class="reconcile-empty" { "No ignored transactions." }
+            } @else {
+                div class="reconcile-grid" {
+                    div class="reconcile-grid-header" { "Outgoing" }
+                    div class="reconcile-grid-header" { "Reconciled" }
+
+                    @for i in 0..ignored_max {
+                        @if let Some(o) = ignored_outgoing.get(i) {
+                            div class="reconcile-txn reconcile-txn--ignored" {
+                                div class="txn-row" {
+                                    span class="txn-date" { (utils::format_date(o.date)) }
+                                    @if !o.vendor.is_empty() {
+                                        span class="txn-vendor" { (o.vendor) }
+                                    }
+                                    span class="txn-amount" { (utils::format_cents(o.amount)) }
+                                    form method="post" action=(format!("/reconcile/{}/unignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form" {
+                                        button type="submit" class="btn-undo" { "Undo" }
+                                    }
                                 }
-                                span class="txn-amount" { (utils::format_cents(o.amount)) }
-                                button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match" }
-                                form method="post" action=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form" {
-                                    input type="hidden" name="sort" value=(sort.to_string()) {}
-                                    button type="submit" class="btn-ignore" { "Ignore" }
-                                }
-                            }
-                            @if !o.metadata.is_empty() {
-                                details class="txn-metadata" {
-                                    summary { "Metadata" }
-                                    table {
-                                        @for (key, val) in &o.metadata {
-                                            tr {
-                                                td class="txn-metadata-key" { (key) }
-                                                td { (val) }
+                                @if !o.metadata.is_empty() {
+                                    details class="txn-metadata" {
+                                        summary { "Metadata" }
+                                        table {
+                                            @for (key, val) in &o.metadata {
+                                                tr {
+                                                    td class="txn-metadata-key" { (key) }
+                                                    td { (val) }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
+                        } @else {
+                            div class="reconcile-grid-spacer" {}
                         }
-                    } @else {
-                        div class="reconcile-grid-spacer" id=(format!("unmatched-out-{}", i)) {}
-                    }
-                    @if let Some(r) = unmatched_reconciled.get(i) {
-                        div class="reconcile-txn reconcile-txn--unmatched" id=(format!("unmatched-rec-{}", i)) {
-                            div class="txn-row" {
-                                input type="checkbox" name="reconciled_ids" value=(r.txn_id) form="reconcile-match-form" class="txn-card-checkbox" {}
-                                span class="txn-date" { (utils::format_date(r.date)) }
-                                @if !r.vendor.is_empty() {
-                                    span class="txn-vendor" { (r.vendor) }
+                        @if let Some(r) = ignored_reconciled.get(i) {
+                            div class="reconcile-txn reconcile-txn--ignored" {
+                                div class="txn-row" {
+                                    span class="txn-date" { (utils::format_date(r.date)) }
+                                    @if !r.vendor.is_empty() {
+                                        span class="txn-vendor" { (r.vendor) }
+                                    }
+                                    span class="txn-amount" { (utils::format_cents(r.amount)) }
+                                    form method="post" action=(format!("/reconcile/{}/unignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form" {
+                                        button type="submit" class="btn-undo" { "Undo" }
+                                    }
                                 }
-                                span class="txn-amount" { (utils::format_cents(r.amount)) }
-                                form method="post" action=(format!("/reconcile/{}/ignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form" {
-                                    input type="hidden" name="sort" value=(sort.to_string()) {}
-                                    button type="submit" class="btn-ignore" { "Ignore" }
-                                }
-                            }
-                            @if !r.metadata.is_empty() {
-                                details class="txn-metadata" {
-                                    summary { "Metadata" }
-                                    table {
-                                        @for (key, val) in &r.metadata {
-                                            tr {
-                                                td class="txn-metadata-key" { (key) }
-                                                td { (val) }
+                                @if !r.metadata.is_empty() {
+                                    details class="txn-metadata" {
+                                        summary { "Metadata" }
+                                        table {
+                                            @for (key, val) in &r.metadata {
+                                                tr {
+                                                    td class="txn-metadata-key" { (key) }
+                                                    td { (val) }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
+                        } @else {
+                            div class="reconcile-grid-spacer" {}
                         }
-                    } @else {
-                        div class="reconcile-grid-spacer" id=(format!("unmatched-rec-{}", i)) {}
                     }
                 }
             }
@@ -1799,21 +1896,13 @@ pub async fn ignore_outgoing(
     Path((session_id, txn_id)): Path<(Uuid, Uuid)>,
     State(state): State<AppState>,
     user: LoggedInUser,
-    axum::Form(form): axum::Form<SortQuery>,
+    axum::Form(_form): axum::Form<SortQuery>,
 ) -> Result<axum::response::Redirect, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
-    // Find the index of this txn in the unmatched list before ignoring it
-    let sort = form.sort.unwrap_or_default();
-    let outgoing = reconcile::list_outgoing(&state.db().await, session_id, sort).await?;
-    let idx = outgoing
-        .iter()
-        .filter(|o| !o.matched)
-        .position(|o| o.txn_id == txn_id);
     reconcile::ignore_outgoing(&state.db().await, txn_id).await?;
-    let anchor = idx.map_or(String::new(), |i| format!("#unmatched-out-{}", i));
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}{}",
-        session_id, anchor
+        "/reconcile/{}#unreconciled-section",
+        session_id
     )))
 }
 
@@ -1821,21 +1910,39 @@ pub async fn ignore_reconciled(
     Path((session_id, txn_id)): Path<(Uuid, Uuid)>,
     State(state): State<AppState>,
     user: LoggedInUser,
-    axum::Form(form): axum::Form<SortQuery>,
+    axum::Form(_form): axum::Form<SortQuery>,
 ) -> Result<axum::response::Redirect, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
-    // Find the index of this txn in the unmatched list before ignoring it
-    let sort = form.sort.unwrap_or_default();
-    let reconciled = reconcile::list_reconciled(&state.db().await, session_id, sort).await?;
-    let idx = reconciled
-        .iter()
-        .filter(|r| !r.matched)
-        .position(|r| r.txn_id == txn_id);
     reconcile::ignore_reconciled(&state.db().await, txn_id).await?;
-    let anchor = idx.map_or(String::new(), |i| format!("#unmatched-rec-{}", i));
     Ok(axum::response::Redirect::to(&format!(
-        "/reconcile/{}{}",
-        session_id, anchor
+        "/reconcile/{}#unreconciled-section",
+        session_id
+    )))
+}
+
+pub async fn unignore_outgoing(
+    Path((session_id, txn_id)): Path<(Uuid, Uuid)>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    reconcile::unignore_outgoing(&state.db().await, txn_id).await?;
+    Ok(axum::response::Redirect::to(&format!(
+        "/reconcile/{}#unreconciled-section",
+        session_id
+    )))
+}
+
+pub async fn unignore_reconciled(
+    Path((session_id, txn_id)): Path<(Uuid, Uuid)>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+) -> Result<axum::response::Redirect, AppError> {
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    reconcile::unignore_reconciled(&state.db().await, txn_id).await?;
+    Ok(axum::response::Redirect::to(&format!(
+        "/reconcile/{}#unreconciled-section",
+        session_id
     )))
 }
 

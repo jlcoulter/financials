@@ -469,6 +469,110 @@ pub async fn ignore_reconciled(pool: &SqlitePool, txn_id: Uuid) -> Result<(), Ap
     Ok(())
 }
 
+pub async fn unignore_outgoing(pool: &SqlitePool, txn_id: Uuid) -> Result<(), AppError> {
+    sqlx::query("UPDATE outgoing_txns SET ignored = FALSE WHERE txn_id = ?")
+        .bind(txn_id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn unignore_reconciled(pool: &SqlitePool, txn_id: Uuid) -> Result<(), AppError> {
+    sqlx::query("UPDATE reconciled_txns SET ignored = FALSE WHERE txn_id = ?")
+        .bind(txn_id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn list_ignored_outgoing(
+    pool: &SqlitePool,
+    session_id: Uuid,
+    sort: SortOrder,
+) -> Result<Vec<OutgoingTxn>, AppError> {
+    let rows = match sort {
+        SortOrder::Date => {
+            sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+                "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM outgoing_txns WHERE session_id = ? AND deleted_at IS NULL AND ignored = TRUE ORDER BY date DESC, created_at DESC",
+            )
+            .bind(session_id.to_string())
+            .fetch_all(pool)
+            .await?
+        }
+        SortOrder::Amount => {
+            sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+                "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM outgoing_txns WHERE session_id = ? AND deleted_at IS NULL AND ignored = TRUE ORDER BY amount DESC, date, created_at",
+            )
+            .bind(session_id.to_string())
+            .fetch_all(pool)
+            .await?
+        }
+    };
+
+    rows.into_iter()
+        .map(
+            |(id_str, sid_str, date_str, amount, vendor, matched, ignored, metadata_str)| {
+                let metadata: HashMap<String, String> =
+                    serde_json::from_str(&metadata_str).unwrap_or_default();
+                Ok(OutgoingTxn {
+                    txn_id: Uuid::parse_str(&id_str)?,
+                    session_id: Uuid::parse_str(&sid_str)?,
+                    date: NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")?,
+                    amount,
+                    vendor,
+                    matched,
+                    ignored,
+                    metadata,
+                })
+            },
+        )
+        .collect()
+}
+
+pub async fn list_ignored_reconciled(
+    pool: &SqlitePool,
+    session_id: Uuid,
+    sort: SortOrder,
+) -> Result<Vec<ReconciledTxn>, AppError> {
+    let rows = match sort {
+        SortOrder::Date => {
+            sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+                "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM reconciled_txns WHERE session_id = ? AND deleted_at IS NULL AND ignored = TRUE ORDER BY date DESC, created_at DESC",
+            )
+            .bind(session_id.to_string())
+            .fetch_all(pool)
+            .await?
+        }
+        SortOrder::Amount => {
+            sqlx::query_as::<_, (String, String, String, i64, String, bool, bool, String)>(
+                "SELECT txn_id, session_id, date, amount, vendor, matched, COALESCE(ignored, FALSE), COALESCE(metadata, '{}') FROM reconciled_txns WHERE session_id = ? AND deleted_at IS NULL AND ignored = TRUE ORDER BY amount DESC, date, created_at",
+            )
+            .bind(session_id.to_string())
+            .fetch_all(pool)
+            .await?
+        }
+    };
+
+    rows.into_iter()
+        .map(
+            |(id_str, sid_str, date_str, amount, vendor, matched, ignored, metadata_str)| {
+                let metadata: HashMap<String, String> =
+                    serde_json::from_str(&metadata_str).unwrap_or_default();
+                Ok(ReconciledTxn {
+                    txn_id: Uuid::parse_str(&id_str)?,
+                    session_id: Uuid::parse_str(&sid_str)?,
+                    date: NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")?,
+                    amount,
+                    vendor,
+                    matched,
+                    ignored,
+                    metadata,
+                })
+            },
+        )
+        .collect()
+}
+
 /// Auto-match: for each unmatched outgoing, find a single unmatched reconciled txn
 /// with the exact same amount, or a set of unmatched reconciled txns whose amounts sum
 /// to the outgoing amount (up to 4 transactions).
