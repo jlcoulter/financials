@@ -127,11 +127,7 @@ pub async fn insights_chart(
         for log in &item_logs {
             let date_str = log.log_date.format("%Y-%m-%d").to_string();
             if let Some(idx) = dates.iter().position(|d| d == &date_str) {
-                let val = if item.item_type == "debt" {
-                    -(log.balance_value as f64) / 100.0
-                } else {
-                    log.balance_value as f64 / 100.0
-                };
+                let val = log.balance_value as f64 / 100.0;
                 row[idx] = val;
             }
         }
