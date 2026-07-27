@@ -427,6 +427,84 @@ pub async fn insights_chart(
     let flow_html = make_chart_id(&flow_html, "flow-chart");
     let pie_html = make_chart_id(&pie_html, "pie-chart");
 
+    // ── Summary cards ──────────────────────────────────────────────
+    // Compute net worth, assets, debts, and last-logged from existing data
+
+    let last_idx = if dates.is_empty() { 0 } else { dates.len() - 1 };
+    let prev_idx = if last_idx >= 1 {
+        last_idx - 1
+    } else {
+        last_idx
+    };
+
+    let mut net_worth_latest = 0.0_f64;
+    let mut net_worth_prev = 0.0_f64;
+    let mut total_assets = 0.0_f64;
+    let mut total_debts = 0.0_f64;
+
+    for (i, item) in items.iter().enumerate() {
+        let latest_val = if i < values.len() && last_idx < values[i].len() {
+            values[i][last_idx]
+        } else {
+            0.0
+        };
+        let prev_val = if i < values.len() && prev_idx < values[i].len() {
+            values[i][prev_idx]
+        } else {
+            0.0
+        };
+
+        net_worth_latest += latest_val;
+        net_worth_prev += prev_val;
+
+        if item.item_type == "debt" {
+            // values[i] stores debts as negative; flip to positive for display
+            total_debts += latest_val.abs();
+        } else {
+            total_assets += latest_val;
+        }
+    }
+
+    let net_worth_change = net_worth_latest - net_worth_prev;
+    let net_worth_change_pct = if net_worth_prev != 0.0 {
+        (net_worth_change / net_worth_prev.abs()) * 100.0
+    } else {
+        0.0
+    };
+
+    // Last logged: days since most recent balance entry
+    let days_since_last_logged = if let Some(latest_date_str) = dates.last() {
+        if let Ok(latest_date) = chrono::NaiveDate::parse_from_str(latest_date_str, "%Y-%m-%d") {
+            let today = chrono::Local::now().naive_local().date();
+            (today - latest_date).num_days().max(0)
+        } else {
+            0_i64
+        }
+    } else {
+        0_i64
+    };
+
+    fn fmt_dollar(val: f64) -> String {
+        if val >= 0.0 {
+            format!("${:.2}", val)
+        } else {
+            format!("-${:.2}", val.abs())
+        }
+    }
+
+    fn fmt_change(val: f64, pct: f64) -> String {
+        let sign = if val >= 0.0 { "+" } else { "" };
+        format!("{}{:.2} ({}{:.1}%)", sign, val, sign, pct)
+    }
+
+    let nw_class = if net_worth_change >= 0.0 {
+        "summary-card--positive"
+    } else {
+        "summary-card--negative"
+    };
+
+    let nw_change_str = fmt_change(net_worth_change, net_worth_change_pct);
+
     Ok(layout(
         "Insights",
         maud::html! {
@@ -434,6 +512,25 @@ pub async fn insights_chart(
             div class="insights-portfolio-list" {
                 @for link in &portfolio_links {
                     (link)
+                }
+            }
+            div class="summary-cards" {
+                div class=(format!("summary-card {}", nw_class)) {
+                    div class="summary-card__value" { (fmt_dollar(net_worth_latest)) }
+                    div class="summary-card__label" { "Net Worth" }
+                    div class="summary-card__change" { (nw_change_str) }
+                }
+                div class="summary-card summary-card--neutral" {
+                    div class="summary-card__value" { (fmt_dollar(total_assets)) }
+                    div class="summary-card__label" { "Total Assets" }
+                }
+                div class="summary-card summary-card--neutral" {
+                    div class="summary-card__value" { (fmt_dollar(total_debts)) }
+                    div class="summary-card__label" { "Total Debts" }
+                }
+                div class="summary-card summary-card--neutral" {
+                    div class="summary-card__value" { (days_since_last_logged) " days" }
+                    div class="summary-card__label" { "Last Logged" }
                 }
             }
             div class="insights-chart-section" {
