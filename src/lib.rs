@@ -1,10 +1,12 @@
 pub mod auth;
 pub mod cookies;
 pub mod error;
+pub mod handlers;
 pub mod layout;
 pub mod models;
-pub mod pages;
+pub mod requests;
 pub mod utils;
+pub mod views;
 
 use axum_extra::extract::cookie::Key;
 use sqlx::SqlitePool;
