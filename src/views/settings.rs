@@ -93,7 +93,7 @@ pub async fn insights_chart(
     use charming::{
         Chart,
         component::{Axis, Legend, Title},
-        element::{AreaStyle, AxisType, Tooltip, Trigger},
+        element::{AreaStyle, AxisType, ItemStyle, Tooltip, Trigger},
         series::Line,
         theme::Theme,
     };
@@ -194,7 +194,80 @@ pub async fn insights_chart(
         .render(&trend_chart)
         .unwrap_or_else(|_| "<p>Trend chart rendering failed</p>".to_string());
 
-    // Chart B: Cash Flow (grouped bar — positive = income, negative = expenses)
+    // Chart B: Category Trend (stacked area — categories instead of individual items)
+    // Group items by item_type and compute total balance per date per category
+    let categories = ["asset", "cash", "debt", "investment"];
+    let category_labels = ["Assets", "Cash", "Debts", "Investments"];
+    let category_colors = ["#3b82f6", "#10b981", "#f87171", "#f59e0b"];
+
+    let mut category_values: Vec<Vec<f64>> = vec![vec![0.0; dates.len()]; categories.len()];
+
+    for item in &items {
+        let cat_idx = categories.iter().position(|&c| c == item.item_type);
+        if let Some(idx) = cat_idx {
+            let item_logs: Vec<_> = logs.iter().filter(|l| l.item_id == item.item_id).collect();
+            for log in &item_logs {
+                let date_str = log.log_date.format("%Y-%m-%d").to_string();
+                if let Some(di) = dates.iter().position(|d| d == &date_str) {
+                    let val = if item.item_type == "debt" {
+                        -(log.balance_value as f64) / 100.0
+                    } else {
+                        log.balance_value as f64 / 100.0
+                    };
+                    category_values[idx][di] += val;
+                }
+            }
+        }
+    }
+
+    let mut category_chart = Chart::new()
+        .background_color("#0f172a")
+        .title(
+            Title::new()
+                .text(format!("{} — Category Trend", portfolio_name))
+                .text_style(white_text.clone()),
+        )
+        .tooltip(Tooltip::new().trigger(Trigger::Axis))
+        .legend(
+            Legend::new()
+                .data(
+                    category_labels
+                        .iter()
+                        .map(|&s| s.to_string())
+                        .collect::<Vec<_>>(),
+                )
+                .text_style(white_text.clone())
+                .top("30"),
+        )
+        .x_axis(
+            Axis::new()
+                .type_(AxisType::Category)
+                .data(dates.clone())
+                .axis_label(white_axis_label.clone()),
+        )
+        .y_axis(
+            Axis::new()
+                .type_(AxisType::Value)
+                .axis_label(white_axis_label.clone()),
+        );
+
+    for (i, &label) in category_labels.iter().enumerate() {
+        let series = Line::new()
+            .name(label)
+            .stack("categories")
+            .area_style(AreaStyle::new().opacity(0.3))
+            .smooth(Smoothness::Boolean(true))
+            .item_style(ItemStyle::new().color(category_colors[i]))
+            .data(category_values[i].clone());
+        category_chart = category_chart.series(series);
+    }
+
+    let category_html = HtmlRenderer::new("category-chart", 900, 500)
+        .theme(Theme::Dark)
+        .render(&category_chart)
+        .unwrap_or_else(|_| "<p>Category chart rendering failed</p>".to_string());
+
+    // Chart C: Cash Flow (grouped bar — positive = income, negative = expenses)
     // Compute per-date totals for inflows vs outflows
     let mut inflow: Vec<f64> = vec![0.0; dates.len()];
     let mut outflow: Vec<f64> = vec![0.0; dates.len()];
@@ -304,6 +377,7 @@ pub async fn insights_chart(
     }
 
     let trend_html = make_chart_id(&trend_html, "trend-chart");
+    let category_html = make_chart_id(&category_html, "category-chart");
     let flow_html = make_chart_id(&flow_html, "flow-chart");
     let pie_html = make_chart_id(&pie_html, "pie-chart");
 
@@ -318,6 +392,9 @@ pub async fn insights_chart(
             }
             div class="insights-chart-section" {
                 (maud::PreEscaped(trend_html))
+            }
+            div class="insights-chart-section" {
+                (maud::PreEscaped(category_html))
             }
             div class="insights-chart-section" {
                 (maud::PreEscaped(flow_html))
