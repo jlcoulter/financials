@@ -199,8 +199,8 @@ pub async fn insights_chart(
     let mut net_worth_per_date: Vec<f64> = vec![0.0; dates.len()];
     for j in 0..dates.len() {
         let mut total = 0.0;
-        for i in 0..item_names.len() {
-            total += values[i][j];
+        for row in &values {
+            total += row[j];
         }
         net_worth_per_date[j] = total;
     }
