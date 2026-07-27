@@ -95,6 +95,12 @@ pub struct SettingsFlash {
     pub flash: Option<String>,
 }
 
+#[derive(Deserialize, Default)]
+pub struct WaterfallQuery {
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+}
+
 #[derive(Deserialize)]
 pub struct BackupForm {
     pub provider: String,

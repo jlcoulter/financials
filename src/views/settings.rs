@@ -3,7 +3,7 @@ use crate::cookies::LoggedInUser;
 use crate::error::AppError;
 use crate::layout::layout;
 use crate::models::{backup, portfolio, user};
-use crate::requests::SettingsFlash;
+use crate::requests::{SettingsFlash, WaterfallQuery};
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use uuid::Uuid;
@@ -83,6 +83,7 @@ pub async fn insights_chart(
     State(state): State<AppState>,
     user: LoggedInUser,
     Path(portfolio_id): Path<Uuid>,
+    Query(waterfall_query): Query<WaterfallQuery>,
 ) -> Result<maud::Markup, AppError> {
     use charming::datatype::DataPoint;
     use charming::element::smoothness::Smoothness;
@@ -363,7 +364,99 @@ pub async fn insights_chart(
         .render(&flow_chart)
         .unwrap_or_else(|_| "<p>Flow chart rendering failed</p>".to_string());
 
-    // Chart C: Asset Allocation (donut pie)
+    // ── Chart C: Waterfall — Date-to-Date Net Worth Breakdown ──
+    // Determine start and end dates from query params, or default to first/last
+    let first_date = dates.first().cloned().unwrap_or_default();
+    let last_date = dates.last().cloned().unwrap_or_default();
+    let start_date = waterfall_query
+        .start_date
+        .clone()
+        .unwrap_or_else(|| first_date.clone());
+    let end_date = waterfall_query
+        .end_date
+        .clone()
+        .unwrap_or_else(|| last_date.clone());
+
+    // Find indices for start and end dates
+    let start_idx = dates.iter().position(|d| d == &start_date).unwrap_or(0);
+    let end_idx = dates
+        .iter()
+        .position(|d| d == &end_date)
+        .unwrap_or(dates.len().saturating_sub(1));
+
+    // Compute each item's contribution: value at end_date - value at start_date
+    let mut waterfall_items: Vec<(String, f64)> = Vec::new();
+    let mut total_change = 0.0;
+    for (i, name) in item_names.iter().enumerate() {
+        let start_val = values[i][start_idx];
+        let end_val = values[i][end_idx];
+        let change = end_val - start_val;
+        waterfall_items.push((name.clone(), change));
+        total_change += change;
+    }
+
+    // Build waterfall bar data: each item as a DataPointItem with individual color
+    let mut waterfall_data: Vec<DataPoint> = Vec::new();
+    for (name, change) in &waterfall_items {
+        let color = if *change >= 0.0 { "#22c55e" } else { "#ef4444" };
+        let dp = DataPoint::Item(
+            charming::datatype::DataPointItem::new(*change)
+                .name(name.clone())
+                .item_style(ItemStyle::new().color(color)),
+        );
+        waterfall_data.push(dp);
+    }
+    // Add total bar at the end
+    let total_color = if total_change >= 0.0 {
+        "#22c55e"
+    } else {
+        "#ef4444"
+    };
+    let total_dp = DataPoint::Item(
+        charming::datatype::DataPointItem::new(total_change)
+            .name("Net Change")
+            .item_style(ItemStyle::new().color(total_color)),
+    );
+    waterfall_data.push(total_dp);
+
+    let waterfall_chart = Chart::new()
+        .background_color("#0f172a")
+        .title(
+            Title::new()
+                .text(format!(
+                    "{} — Net Worth Change: {} to {}",
+                    portfolio_name, start_date, end_date
+                ))
+                .text_style(white_text.clone()),
+        )
+        .tooltip(Tooltip::new().trigger(Trigger::Axis))
+        .x_axis(
+            Axis::new()
+                .type_(AxisType::Category)
+                .data(
+                    waterfall_items
+                        .iter()
+                        .map(|(n, _)| n.clone())
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .chain(std::iter::once("Net Change".to_string()))
+                        .collect::<Vec<_>>(),
+                )
+                .axis_label(white_axis_label.clone()),
+        )
+        .y_axis(
+            Axis::new()
+                .type_(AxisType::Value)
+                .axis_label(white_axis_label.clone()),
+        )
+        .series(Bar::new().name("Contribution").data(waterfall_data));
+
+    let waterfall_html = HtmlRenderer::new("waterfall-chart", 900, 400)
+        .theme(Theme::Dark)
+        .render(&waterfall_chart)
+        .unwrap_or_else(|_| "<p>Waterfall chart rendering failed</p>".to_string());
+
+    // Chart D: Asset Allocation (donut pie)
     // Compute latest values per item (use last non-zero, or last date's value)
     let mut pie_data: Vec<(String, f64)> = Vec::new();
     for (i, name) in item_names.iter().enumerate() {
@@ -425,6 +518,7 @@ pub async fn insights_chart(
     let trend_html = make_chart_id(&trend_html, "trend-chart");
     let change_html = make_chart_id(&change_html, "change-chart");
     let flow_html = make_chart_id(&flow_html, "flow-chart");
+    let waterfall_html = make_chart_id(&waterfall_html, "waterfall-chart");
     let pie_html = make_chart_id(&pie_html, "pie-chart");
 
     // ── Summary cards ──────────────────────────────────────────────
@@ -541,6 +635,20 @@ pub async fn insights_chart(
             }
             div class="insights-chart-section" {
                 (maud::PreEscaped(flow_html))
+            }
+            div class="insights-chart-section" {
+                div class="waterfall-date-selector" {
+                    form method="get" action=(format!("/insights/{}", portfolio_id)) {
+                        label { "Start Date"
+                            input type="date" name="start_date" value=(start_date);
+                        }
+                        label { "End Date"
+                            input type="date" name="end_date" value=(end_date);
+                        }
+                        button type="submit" { "Update" }
+                    }
+                }
+                (maud::PreEscaped(waterfall_html))
             }
             div class="insights-chart-section" {
                 (maud::PreEscaped(pie_html))
