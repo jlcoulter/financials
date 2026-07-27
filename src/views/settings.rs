@@ -83,20 +83,23 @@ pub async fn insights_chart(
     State(state): State<AppState>,
     user: LoggedInUser,
     Path(portfolio_id): Path<Uuid>,
+    Query(query): Query<crate::requests::DateRangeQuery>,
 ) -> Result<maud::Markup, AppError> {
     use charming::datatype::DataPoint;
+    use charming::element::js_function::JsFunction;
     use charming::element::smoothness::Smoothness;
     use charming::element::{AxisLabel, TextStyle};
+    use charming::element::{ItemStyle, Symbol};
     use charming::renderer::HtmlRenderer;
-    use charming::series::Bar;
     use charming::series::Pie;
     use charming::{
         Chart,
-        component::{Axis, Legend, Title},
+        component::{Axis, Grid, Legend, Title},
         element::{AreaStyle, AxisType, Tooltip, Trigger},
         series::Line,
         theme::Theme,
     };
+    use chrono::Datelike;
 
     let portfolios = portfolio::list_portfolios(&state.db().await, user.0).await?;
     let portfolio_name = portfolios
@@ -108,20 +111,69 @@ pub async fn insights_chart(
     let items = portfolio::list_wealth_items(&state.db().await, portfolio_id).await?;
     let logs = portfolio::list_balance_logs(&state.db().await, portfolio_id).await?;
 
-    // Get unique dates sorted ascending
+    // Compute cutoff date from the range query parameter
+    let today = chrono::Local::now().date_naive();
+    let cutoff = match query.range.as_deref() {
+        Some("30d") => today - chrono::Duration::days(30),
+        Some("90d") => today - chrono::Duration::days(90),
+        Some("quarter") => {
+            // Last quarter: start of current quarter minus 3 months
+            let m = today.month();
+            let q_start_month = ((m - 1) / 3) * 3 + 1; // 1, 4, 7, 10
+            let q_start =
+                chrono::NaiveDate::from_ymd_opt(today.year(), q_start_month, 1).unwrap_or(today);
+            q_start - chrono::Duration::days(1) - chrono::Duration::days(90)
+        }
+        Some("6m") => today - chrono::Duration::days(180),
+        Some("1y") => today - chrono::Duration::days(365),
+        Some("this_fy") => {
+            // Current financial year (July 1 – June 30)
+            let fy_year = if today.month() >= 7 {
+                today.year()
+            } else {
+                today.year() - 1
+            };
+            chrono::NaiveDate::from_ymd_opt(fy_year, 7, 1).unwrap_or(today)
+        }
+        Some("last_fy") => {
+            // Previous financial year
+            let fy_year = if today.month() >= 7 {
+                today.year() - 1
+            } else {
+                today.year() - 2
+            };
+            chrono::NaiveDate::from_ymd_opt(fy_year, 7, 1).unwrap_or(today)
+        }
+        _ => chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(), // All time
+    };
+
+    // Get unique dates sorted ascending, filtered by cutoff
     let mut dates: Vec<String> = logs
         .iter()
+        .filter(|l| l.log_date >= cutoff)
         .map(|l| l.log_date.format("%Y-%m-%d").to_string())
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
     dates.sort();
 
+    // Display format for x-axis labels
+    let display_dates: Vec<String> = dates
+        .iter()
+        .map(|d| {
+            let parts: Vec<&str> = d.split('-').collect();
+            format!("{}-{}-{}", parts[2], parts[1], parts[0])
+        })
+        .collect();
+
     let mut item_names: Vec<String> = Vec::new();
     let mut values: Vec<Vec<f64>> = Vec::new();
 
     for item in &items {
-        let item_logs: Vec<_> = logs.iter().filter(|l| l.item_id == item.item_id).collect();
+        let item_logs: Vec<_> = logs
+            .iter()
+            .filter(|l| l.item_id == item.item_id && l.log_date >= cutoff)
+            .collect();
 
         let mut row = vec![0.0; dates.len()];
         for log in &item_logs {
@@ -132,7 +184,8 @@ pub async fn insights_chart(
                 } else {
                     log.balance_value as f64 / 100.0
                 };
-                row[idx] = val;
+                // Round to 2 decimal places to avoid floating-point noise
+                row[idx] = (val * 100.0).round() / 100.0;
             }
         }
 
@@ -149,35 +202,70 @@ pub async fn insights_chart(
         }
     }).collect();
 
+    // Date range presets
+    let presets = [
+        ("30d", "Last 30 days"),
+        ("90d", "Last 90 days"),
+        ("quarter", "Last quarter"),
+        ("6m", "Last 6 months"),
+        ("1y", "Last year"),
+        ("this_fy", "This FY"),
+        ("last_fy", "Last FY"),
+        ("all", "All time"),
+    ];
+    let current_range = query.range.as_deref().unwrap_or("all");
+    let date_filter_links: Vec<maud::Markup> = presets
+        .iter()
+        .map(|(key, label)| {
+            let href = if *key == "all" {
+                format!("/insights/{}", portfolio_id)
+            } else {
+                format!("/insights/{}?range={}", portfolio_id, key)
+            };
+            let cls = if *key == current_range {
+                "insights-range-btn current"
+            } else {
+                "insights-range-btn"
+            };
+            maud::html! {
+                a href=(href) class=(cls) role="button" { (label) }
+            }
+        })
+        .collect();
+
     // Chart A: Cumulative Net Worth Trend (stacked area line)
     let white_text = TextStyle::new().color("#ffffff");
     let white_axis_label = AxisLabel::new().color("#ffffff");
 
-    let mut trend_chart = Chart::new()
-        .background_color("#0f172a")
-        .title(
-            Title::new()
-                .text(format!("{} — Net Worth Trend", portfolio_name))
-                .text_style(white_text.clone()),
-        )
-        .tooltip(Tooltip::new().trigger(Trigger::Axis))
-        .legend(
-            Legend::new()
-                .data(item_names.clone())
-                .text_style(white_text.clone())
-                .top("30"),
-        )
-        .x_axis(
-            Axis::new()
-                .type_(AxisType::Category)
-                .data(dates.clone())
-                .axis_label(white_axis_label.clone()),
-        )
-        .y_axis(
-            Axis::new()
-                .type_(AxisType::Value)
-                .axis_label(white_axis_label.clone()),
-        );
+    let mut trend_chart =
+        Chart::new()
+            .background_color("#0f172a")
+            .title(
+                Title::new()
+                    .text(format!("{} — Net Worth Trend", portfolio_name))
+                    .text_style(white_text.clone()),
+            )
+            .tooltip(Tooltip::new().trigger(Trigger::Axis).value_formatter(
+                JsFunction::new_with_args("value", "return Number(value).toFixed(2);"),
+            ))
+            .legend(
+                Legend::new()
+                    .data(item_names.clone())
+                    .text_style(white_text.clone())
+                    .top("40"),
+            )
+            .grid(Grid::new().top(100).bottom(40))
+            .x_axis(
+                Axis::new()
+                    .type_(AxisType::Category)
+                    .data(display_dates.clone())
+                    .axis_label(white_axis_label.clone()),
+            )
+            .y_axis(
+                Axis::new()
+                    .type_(AxisType::Value)
+                    .axis_label(white_axis_label.clone()),
+            );
 
     for (i, name) in item_names.iter().enumerate() {
         let series = Line::new()
@@ -189,62 +277,87 @@ pub async fn insights_chart(
         trend_chart = trend_chart.series(series);
     }
 
+    // Add Net Worth trend line (sum of all items per date — debts are already negative)
+    let net_worth: Vec<f64> = (0..dates.len())
+        .map(|j| values.iter().map(|row| row[j]).sum())
+        .collect();
+
+    // ── Summary stats (before net_worth is moved into the chart) ──
+    let total_net_worth = *net_worth.last().unwrap_or(&0.0);
+    let total_debt: f64 = items
+        .iter()
+        .zip(values.iter())
+        .filter(|(item, _)| item.item_type == "debt")
+        .map(|(_, vals)| {
+            vals.iter()
+                .rev()
+                .find(|&&v| v != 0.0)
+                .copied()
+                .unwrap_or(0.0)
+        })
+        .sum();
+    let total_increase = if net_worth.len() >= 2 {
+        net_worth.last().unwrap() - net_worth.first().unwrap()
+    } else {
+        0.0
+    };
+    let num_months = if dates.len() >= 2 {
+        let first = &dates[0];
+        let last = &dates[dates.len() - 1];
+        let fy: Vec<&str> = first.split('-').collect();
+        let ly: Vec<&str> = last.split('-').collect();
+        let y1: i32 = fy[0].parse().unwrap_or(0);
+        let m1: i32 = fy[1].parse().unwrap_or(1);
+        let y2: i32 = ly[0].parse().unwrap_or(0);
+        let m2: i32 = ly[1].parse().unwrap_or(1);
+        ((y2 - y1) * 12 + (m2 - m1)).max(1) as f64
+    } else {
+        1.0
+    };
+    let avg_per_month = total_increase / num_months;
+
+    fn fmt_val(v: f64) -> String {
+        let abs = (v * 100.0).round() / 100.0;
+        if abs >= 0.0 {
+            format!("${:.2}", abs)
+        } else {
+            format!("-${:.2}", -abs)
+        }
+    }
+
+    let summary_rows = [
+        ("Total Net Worth", fmt_val(total_net_worth)),
+        ("Debt", fmt_val(total_debt)),
+        ("Total Increase", fmt_val(total_increase)),
+        ("Avg / Month", fmt_val(avg_per_month)),
+    ];
+
+    let net_worth_series = Line::new()
+        .name("Net Worth")
+        .smooth(Smoothness::Boolean(true))
+        .symbol(Symbol::Circle)
+        .symbol_size(8.0)
+        .line_style(
+            charming::element::LineStyle::new()
+                .color("#ffffff")
+                .width(3),
+        )
+        .item_style(
+            ItemStyle::new()
+                .color("#3b82f6")
+                .border_color("#3b82f6")
+                .border_width(2),
+        )
+        .data(net_worth.clone());
+
+    trend_chart = trend_chart.series(net_worth_series);
+
     let trend_html = HtmlRenderer::new("trend-chart", 900, 500)
         .theme(Theme::Dark)
         .render(&trend_chart)
         .unwrap_or_else(|_| "<p>Trend chart rendering failed</p>".to_string());
 
-    // Chart B: Cash Flow (grouped bar — positive = income, negative = expenses)
-    // Compute per-date totals for inflows vs outflows
-    let mut inflow: Vec<f64> = vec![0.0; dates.len()];
-    let mut outflow: Vec<f64> = vec![0.0; dates.len()];
-    for (i, name) in item_names.iter().enumerate() {
-        let item = items.iter().find(|it| &it.name == name).unwrap();
-        for (j, &val) in values[i].iter().enumerate() {
-            if item.item_type == "debt" {
-                outflow[j] += val.abs();
-            } else {
-                inflow[j] += val;
-            }
-        }
-    }
-
-    let mut flow_chart = Chart::new()
-        .background_color("#0f172a")
-        .title(
-            Title::new()
-                .text(format!("{} — Cash Flow", portfolio_name))
-                .text_style(white_text.clone()),
-        )
-        .tooltip(Tooltip::new().trigger(Trigger::Axis))
-        .legend(
-            Legend::new()
-                .data(vec!["Income".to_string(), "Expenses".to_string()])
-                .text_style(white_text.clone())
-                .top("30"),
-        )
-        .x_axis(
-            Axis::new()
-                .type_(AxisType::Category)
-                .data(dates.clone())
-                .axis_label(white_axis_label.clone()),
-        )
-        .y_axis(
-            Axis::new()
-                .type_(AxisType::Value)
-                .axis_label(white_axis_label.clone()),
-        );
-
-    flow_chart = flow_chart
-        .series(Bar::new().name("Income").data(inflow))
-        .series(Bar::new().name("Expenses").data(outflow));
-
-    let flow_html = HtmlRenderer::new("flow-chart", 900, 400)
-        .theme(Theme::Dark)
-        .render(&flow_chart)
-        .unwrap_or_else(|_| "<p>Flow chart rendering failed</p>".to_string());
-
-    // Chart C: Asset Allocation (donut pie)
+    // Chart B: Asset Allocation (donut pie)
     // Compute latest values per item (use last non-zero, or last date's value)
     let mut pie_data: Vec<(String, f64)> = Vec::new();
     for (i, name) in item_names.iter().enumerate() {
@@ -304,7 +417,6 @@ pub async fn insights_chart(
     }
 
     let trend_html = make_chart_id(&trend_html, "trend-chart");
-    let flow_html = make_chart_id(&flow_html, "flow-chart");
     let pie_html = make_chart_id(&pie_html, "pie-chart");
 
     Ok(layout(
@@ -316,11 +428,25 @@ pub async fn insights_chart(
                     (link)
                 }
             }
-            div class="insights-chart-section" {
-                (maud::PreEscaped(trend_html))
+            div class="insights-date-filter" {
+                @for link in &date_filter_links {
+                    (link)
+                }
+            }
+            table class="insights-summary" {
+                tr {
+                    th { "Metric" }
+                    th { "Value" }
+                }
+                @for (label, value) in &summary_rows {
+                    tr {
+                        td { (label) }
+                        td class="insights-summary-value" { (value) }
+                    }
+                }
             }
             div class="insights-chart-section" {
-                (maud::PreEscaped(flow_html))
+                (maud::PreEscaped(trend_html))
             }
             div class="insights-chart-section" {
                 (maud::PreEscaped(pie_html))
