@@ -83,6 +83,67 @@ body {
     width: 100%;
 }
 
+.insights-date-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.insights-range-btn {
+    color: #ffffff;
+    text-decoration: none;
+    padding: 0.35rem 0.8rem;
+    border: 1px solid #555;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.insights-range-btn:hover {
+    background: #333;
+    border-color: #888;
+}
+
+.insights-range-btn.current {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.insights-summary {
+    width: 100%;
+    max-width: 500px;
+    margin-bottom: 1.5rem;
+    border-collapse: collapse;
+    color: #ffffff;
+}
+
+.insights-summary th,
+.insights-summary td {
+    padding: 0.5rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid #333;
+}
+
+.insights-summary th {
+    font-weight: 600;
+    color: #aaa;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.insights-summary td {
+    font-size: 0.95rem;
+}
+
+.insights-summary-value {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
 .add-item-details {
     margin: 1rem 0;
 }

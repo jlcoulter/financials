@@ -95,6 +95,11 @@ pub struct SettingsFlash {
     pub flash: Option<String>,
 }
 
+#[derive(Deserialize, Default)]
+pub struct DateRangeQuery {
+    pub range: Option<String>,
+}
+
 #[derive(Deserialize)]
 pub struct BackupForm {
     pub provider: String,
