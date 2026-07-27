@@ -93,7 +93,7 @@ pub async fn insights_chart(
     use charming::{
         Chart,
         component::{Axis, Legend, Title},
-        element::{AreaStyle, AxisType, Tooltip, Trigger},
+        element::{AreaStyle, AxisType, ItemStyle, Tooltip, Trigger},
         series::Line,
         theme::Theme,
     };
@@ -194,7 +194,116 @@ pub async fn insights_chart(
         .render(&trend_chart)
         .unwrap_or_else(|_| "<p>Trend chart rendering failed</p>".to_string());
 
-    // Chart B: Cash Flow (grouped bar — positive = income, negative = expenses)
+    // Chart B: Net Worth Change (period-over-period bar chart)
+    // Compute total net worth per date
+    let mut net_worth_per_date: Vec<f64> = vec![0.0; dates.len()];
+    for j in 0..dates.len() {
+        let mut total = 0.0;
+        for row in &values {
+            total += row[j];
+        }
+        net_worth_per_date[j] = total;
+    }
+
+    // Compute period-over-period changes
+    let mut changes: Vec<f64> = vec![0.0; dates.len()];
+    let mut gains: Vec<f64> = vec![0.0; dates.len()];
+    let mut losses: Vec<f64> = vec![0.0; dates.len()];
+    for j in 1..dates.len() {
+        let change = net_worth_per_date[j] - net_worth_per_date[j - 1];
+        changes[j] = change;
+        if change >= 0.0 {
+            gains[j] = change;
+        } else {
+            losses[j] = change;
+        }
+    }
+
+    // Build percentage changes for tooltip
+    let pct_changes: Vec<String> = (0..dates.len())
+        .map(|j| {
+            if j == 0 || net_worth_per_date[j - 1] == 0.0 {
+                "N/A".to_string()
+            } else {
+                let pct = (changes[j] / net_worth_per_date[j - 1]) * 100.0;
+                format!("{:.2}%", pct)
+            }
+        })
+        .collect();
+
+    // JS formatter for tooltip: show date, dollar change, and percentage
+    let tooltip_formatter = charming::element::js_function::JsFunction::new_with_args(
+        "params",
+        &format!(
+            r#"
+                var data = params[0];
+                var idx = data.dataIndex;
+                var dates = {};
+                var changes = {};
+                var pcts = {};
+                var val = data.value;
+                var sign = val >= 0 ? '+' : '';
+                var color = val >= 0 ? '#10b981' : '#f87171';
+                return '<div style="font-weight:bold;margin-bottom:4px">' + dates[idx] + '</div>' +
+                       '<div style="color:' + color + '">' + sign + '$' + Math.abs(val).toFixed(2) + '</div>' +
+                       '<div style="color:' + color + '">' + sign + pcts[idx] + '</div>';
+            "#,
+            serde_json::to_string(&dates).unwrap_or_default(),
+            serde_json::to_string(&changes).unwrap_or_default(),
+            serde_json::to_string(&pct_changes).unwrap_or_default(),
+        ),
+    );
+
+    let mut change_chart = Chart::new()
+        .background_color("#0f172a")
+        .title(
+            Title::new()
+                .text(format!("{} — Net Worth Change", portfolio_name))
+                .text_style(white_text.clone()),
+        )
+        .tooltip(
+            Tooltip::new()
+                .trigger(Trigger::Axis)
+                .formatter(tooltip_formatter),
+        )
+        .legend(
+            Legend::new()
+                .data(vec!["Gains".to_string(), "Losses".to_string()])
+                .text_style(white_text.clone())
+                .top("30"),
+        )
+        .x_axis(
+            Axis::new()
+                .type_(AxisType::Category)
+                .data(dates.clone())
+                .axis_label(white_axis_label.clone()),
+        )
+        .y_axis(
+            Axis::new()
+                .type_(AxisType::Value)
+                .axis_label(white_axis_label.clone()),
+        );
+
+    change_chart = change_chart
+        .series(
+            Bar::new()
+                .name("Gains")
+                .item_style(ItemStyle::new().color("#10b981"))
+                .data(gains),
+        )
+        .series(
+            Bar::new()
+                .name("Losses")
+                .item_style(ItemStyle::new().color("#f87171"))
+                .data(losses),
+        );
+
+    let change_html = HtmlRenderer::new("change-chart", 900, 400)
+        .theme(Theme::Dark)
+        .render(&change_chart)
+        .unwrap_or_else(|_| "<p>Change chart rendering failed</p>".to_string());
+
+    // Chart C: Cash Flow (grouped bar — positive = income, negative = expenses)
     // Compute per-date totals for inflows vs outflows
     let mut inflow: Vec<f64> = vec![0.0; dates.len()];
     let mut outflow: Vec<f64> = vec![0.0; dates.len()];
@@ -304,6 +413,7 @@ pub async fn insights_chart(
     }
 
     let trend_html = make_chart_id(&trend_html, "trend-chart");
+    let change_html = make_chart_id(&change_html, "change-chart");
     let flow_html = make_chart_id(&flow_html, "flow-chart");
     let pie_html = make_chart_id(&pie_html, "pie-chart");
 
@@ -318,6 +428,9 @@ pub async fn insights_chart(
             }
             div class="insights-chart-section" {
                 (maud::PreEscaped(trend_html))
+            }
+            div class="insights-chart-section" {
+                (maud::PreEscaped(change_html))
             }
             div class="insights-chart-section" {
                 (maud::PreEscaped(flow_html))
