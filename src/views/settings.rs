@@ -86,7 +86,7 @@ pub async fn insights_chart(
 ) -> Result<maud::Markup, AppError> {
     use charming::datatype::DataPoint;
     use charming::element::smoothness::Smoothness;
-    use charming::element::{AxisLabel, TextStyle};
+    use charming::element::{AxisLabel, LineStyle, TextStyle};
     use charming::renderer::HtmlRenderer;
     use charming::series::Bar;
     use charming::series::Pie;
@@ -188,6 +188,20 @@ pub async fn insights_chart(
             .data(values[i].clone());
         trend_chart = trend_chart.series(series);
     }
+
+    // Compute cumulative total (net worth) per date and add a white line overlay
+    let mut cumulative: Vec<f64> = vec![0.0; dates.len()];
+    for row in &values {
+        for j in 0..dates.len() {
+            cumulative[j] += row[j];
+        }
+    }
+    let total_line = Line::new()
+        .name("Total Net Worth")
+        .line_style(LineStyle::new().width(3).color("#ffffff"))
+        .smooth(Smoothness::Boolean(true))
+        .data(cumulative);
+    trend_chart = trend_chart.series(total_line);
 
     let trend_html = HtmlRenderer::new("trend-chart", 900, 500)
         .theme(Theme::Dark)
