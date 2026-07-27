@@ -79,11 +79,17 @@ pub async fn insights(
     ))
 }
 
+#[derive(serde::Deserialize, Default)]
+pub struct ItemQuery {
+    item: Option<String>,
+}
+
 pub async fn insights_chart(
     State(state): State<AppState>,
     user: LoggedInUser,
     Path(portfolio_id): Path<Uuid>,
     Query(waterfall_query): Query<WaterfallQuery>,
+    Query(item_query): Query<ItemQuery>,
 ) -> Result<maud::Markup, AppError> {
     use charming::datatype::DataPoint;
     use charming::element::smoothness::Smoothness;
@@ -599,6 +605,61 @@ pub async fn insights_chart(
 
     let nw_change_str = fmt_change(net_worth_change, net_worth_change_pct);
 
+    // Build item links for standalone view
+    let item_links: Vec<maud::Markup> = items
+        .iter()
+        .map(|item| {
+            let href = format!("/insights/{}?item={}", portfolio_id, item.item_id);
+            maud::html! {
+                a href=(href) class="insights-item-link" { (item.name) }
+            }
+        })
+        .collect();
+
+    // Chart F: Standalone item balance history (when an item is selected)
+    let item_chart_html: Option<String> = item_query.item.as_ref().and_then(|item_id_str| {
+        let item_id = Uuid::parse_str(item_id_str).ok()?;
+        let item = items.iter().find(|i| i.item_id == item_id)?;
+        let item_idx = items.iter().position(|i| i.item_id == item_id)?;
+
+        let mut item_chart = Chart::new()
+            .background_color("#0f172a")
+            .title(
+                Title::new()
+                    .text(format!(
+                        "{} — {} Balance History",
+                        portfolio_name, item.name
+                    ))
+                    .text_style(white_text.clone()),
+            )
+            .tooltip(Tooltip::new().trigger(Trigger::Axis))
+            .x_axis(
+                Axis::new()
+                    .type_(AxisType::Category)
+                    .data(dates.clone())
+                    .axis_label(white_axis_label.clone()),
+            )
+            .y_axis(
+                Axis::new()
+                    .type_(AxisType::Value)
+                    .axis_label(white_axis_label.clone()),
+            );
+
+        let series = Line::new()
+            .name(item.name.clone())
+            .smooth(Smoothness::Boolean(true))
+            .area_style(AreaStyle::new().opacity(0.3))
+            .data(values[item_idx].clone());
+        item_chart = item_chart.series(series);
+
+        let html = HtmlRenderer::new("item-chart", 900, 500)
+            .theme(Theme::Dark)
+            .render(&item_chart)
+            .unwrap_or_else(|_| "<p>Item chart rendering failed</p>".to_string());
+
+        Some(make_chart_id(&html, "item-chart"))
+    });
+
     Ok(layout(
         "Insights",
         maud::html! {
@@ -625,6 +686,19 @@ pub async fn insights_chart(
                 div class="summary-card summary-card--neutral" {
                     div class="summary-card__value" { (days_since_last_logged) " days" }
                     div class="summary-card__label" { "Last Logged" }
+                }
+            }
+            @if let Some(ref item_html) = item_chart_html {
+                div class="insights-item-links" {
+                    @for link in &item_links {
+                        (link)
+                    }
+                }
+                div class="insights-chart-section" {
+                    a href=(format!("/insights/{}", portfolio_id)) class="back-link" { "← Back to all items" }
+                }
+                div class="insights-chart-section" {
+                    (maud::PreEscaped(item_html.clone()))
                 }
             }
             div class="insights-chart-section" {
