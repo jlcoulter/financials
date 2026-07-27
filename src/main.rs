@@ -1,7 +1,8 @@
 use financials::AppState;
 use financials::auth;
+use financials::handlers;
 use financials::models::user;
-use financials::pages;
+use financials::views;
 use std::str::FromStr;
 
 use axum::Router;
@@ -172,61 +173,67 @@ async fn main() -> anyhow::Result<()> {
 fn app(state: AppState, static_dir: String) -> Router {
     Router::new()
         // Public routes (no auth required)
-        .route("/", axum::routing::get(pages::hello))
-        .route("/time", axum::routing::get(pages::time))
+        .route("/", axum::routing::get(handlers::hello::hello))
+        .route("/time", axum::routing::get(handlers::hello::time))
         .route("/login", axum::routing::get(auth::login))
         .route("/login", axum::routing::post(auth::login_post))
-        .route("/backup", axum::routing::get(pages::backup_page))
+        .route("/backup", axum::routing::get(views::settings::backup_page))
         .route(
             "/backup/restore",
-            axum::routing::post(pages::backup_restore),
+            axum::routing::post(handlers::backup::backup_restore),
         )
         .route(
             "/backup/restore-points",
-            axum::routing::get(pages::backup_restore_points),
+            axum::routing::get(handlers::backup::backup_restore_points),
         )
         // Authenticated routes
-        .route("/dashboard", axum::routing::get(pages::dashboard))
-        .route("/settings", axum::routing::get(pages::settings))
+        .route("/dashboard", axum::routing::get(views::settings::dashboard))
+        .route("/settings", axum::routing::get(views::settings::settings))
         .route(
             "/settings/backup",
-            axum::routing::post(pages::settings_backup_post),
+            axum::routing::post(handlers::backup::settings_backup_post),
         )
         .route(
             "/settings/backup/enable",
-            axum::routing::post(pages::settings_backup_enable),
+            axum::routing::post(handlers::backup::settings_backup_enable),
         )
         .route(
             "/settings/backup/disable",
-            axum::routing::post(pages::settings_backup_disable),
+            axum::routing::post(handlers::backup::settings_backup_disable),
         )
         .route(
             "/settings/backup/restore",
-            axum::routing::post(pages::settings_backup_restore),
+            axum::routing::post(handlers::backup::settings_backup_restore),
         )
         .route(
             "/settings/backup/restore-points",
-            axum::routing::get(pages::settings_backup_restore_points),
+            axum::routing::get(handlers::backup::settings_backup_restore_points),
         )
         .route(
             "/settings/backup/snapshot",
-            axum::routing::post(pages::settings_backup_snapshot),
+            axum::routing::post(handlers::backup::settings_backup_snapshot),
         )
         .route(
             "/backup/configure",
-            axum::routing::post(pages::backup_configure),
+            axum::routing::post(handlers::backup::backup_configure),
         )
-        .route("/backup/enable", axum::routing::post(pages::backup_enable))
+        .route(
+            "/backup/enable",
+            axum::routing::post(handlers::backup::backup_enable),
+        )
         .route(
             "/backup/disable",
-            axum::routing::post(pages::backup_disable),
+            axum::routing::post(handlers::backup::backup_disable),
         )
         .route(
             "/backup/snapshot",
-            axum::routing::post(pages::backup_snapshot),
+            axum::routing::post(handlers::backup::backup_snapshot),
         )
-        .route("/insights", axum::routing::get(pages::insights))
-        .route("/insights/{id}", axum::routing::get(pages::insights_chart))
+        .route("/insights", axum::routing::get(views::settings::insights))
+        .route(
+            "/insights/{id}",
+            axum::routing::get(views::settings::insights_chart),
+        )
         .route("/logout", axum::routing::post(auth::logout_post))
         .route(
             "/setup-password",
@@ -240,145 +247,175 @@ fn app(state: AppState, static_dir: String) -> Router {
             "/change-password",
             axum::routing::post(auth::change_password_post),
         )
-        .route("/portfolios", axum::routing::get(pages::portfolios))
-        .route("/portfolios", axum::routing::post(pages::create_portfolio))
-        .route("/portfolio/{id}", axum::routing::get(pages::portfolio))
+        .route(
+            "/portfolios",
+            axum::routing::get(views::portfolio::portfolios),
+        )
+        .route(
+            "/portfolios",
+            axum::routing::post(handlers::create_portfolio::create_portfolio),
+        )
+        .route(
+            "/portfolio/{id}",
+            axum::routing::get(views::portfolio::portfolio),
+        )
         .route(
             "/portfolio/{id}/items",
-            axum::routing::post(pages::add_item),
+            axum::routing::post(handlers::items::add_item),
         )
         .route(
             "/portfolio/{id}/rename",
-            axum::routing::post(pages::rename_portfolio),
+            axum::routing::post(handlers::rename_portfolio::rename_portfolio),
         )
         .route(
             "/portfolio/{id}/balances",
-            axum::routing::post(pages::add_balance),
+            axum::routing::post(handlers::portfolio::add_balance),
         )
-        .route("/portfolio/{id}/cell", axum::routing::get(pages::edit_cell))
-        .route("/portfolio/{id}/cell", axum::routing::put(pages::save_cell))
-        .route("/portfolio/{id}/date", axum::routing::get(pages::edit_date))
-        .route("/portfolio/{id}/date", axum::routing::put(pages::save_date))
-        .route("/portfolio/{id}/row", axum::routing::get(pages::get_row))
+        .route(
+            "/portfolio/{id}/cell",
+            axum::routing::get(handlers::portfolio::edit_cell),
+        )
+        .route(
+            "/portfolio/{id}/cell",
+            axum::routing::put(handlers::portfolio::save_cell),
+        )
+        .route(
+            "/portfolio/{id}/date",
+            axum::routing::get(handlers::portfolio::edit_date),
+        )
+        .route(
+            "/portfolio/{id}/date",
+            axum::routing::put(handlers::portfolio::save_date),
+        )
+        .route(
+            "/portfolio/{id}/row",
+            axum::routing::get(handlers::portfolio::get_row),
+        )
         .route(
             "/portfolio/{id}/rename-item",
-            axum::routing::post(pages::save_item_name),
+            axum::routing::post(handlers::items::save_item_name),
         )
         .route(
             "/portfolio/{id}/move-item",
-            axum::routing::post(pages::move_item),
+            axum::routing::post(handlers::items::move_item),
         )
         .route(
             "/portfolio/{id}/change-type",
-            axum::routing::post(pages::change_item_type),
+            axum::routing::post(handlers::items::change_item_type),
         )
         .route(
             "/portfolio/{id}/delete-item",
-            axum::routing::post(pages::delete_item),
+            axum::routing::post(handlers::items::delete_item),
         )
         .route(
             "/portfolio/{id}/import",
-            axum::routing::get(pages::portfolio_import),
+            axum::routing::get(handlers::portfolio::portfolio_import),
         )
         .route(
             "/portfolio/{id}/import",
-            axum::routing::post(pages::portfolio_import_post),
+            axum::routing::post(handlers::portfolio::portfolio_import_post),
         )
         .route(
             "/portfolio/{id}/import/confirm",
-            axum::routing::post(pages::portfolio_import_confirm),
+            axum::routing::post(handlers::portfolio::portfolio_import_confirm),
         )
         .route(
             "/portfolio/{id}/export/csv",
-            axum::routing::get(pages::portfolio_csv),
+            axum::routing::get(handlers::portfolio::portfolio_csv),
         )
-        .route("/reconcile", axum::routing::get(pages::reconcile_list))
-        .route("/reconcile", axum::routing::post(pages::reconcile_create))
+        .route(
+            "/reconcile",
+            axum::routing::get(views::reconcile::reconcile_list),
+        )
+        .route(
+            "/reconcile",
+            axum::routing::post(handlers::reconcile::reconcile_create),
+        )
         .route(
             "/reconcile/{id}",
-            axum::routing::get(pages::reconcile_detail),
+            axum::routing::get(views::reconcile::reconcile_detail),
         )
         .route(
             "/reconcile/{id}/delete",
-            axum::routing::post(pages::reconcile_delete),
+            axum::routing::post(handlers::reconcile::reconcile_delete),
         )
         .route(
             "/reconcile/{id}/rename",
-            axum::routing::post(pages::rename_session),
+            axum::routing::post(handlers::reconcile::rename_session),
         )
         .route(
             "/reconcile/{id}/outgoing",
-            axum::routing::post(pages::add_outgoing),
+            axum::routing::post(handlers::reconcile::add_outgoing),
         )
         .route(
             "/reconcile/{id}/outgoing/csv",
-            axum::routing::post(pages::upload_outgoing_csv),
+            axum::routing::post(handlers::reconcile::upload_outgoing_csv),
         )
         .route(
             "/reconcile/{id}/outgoing-csv/confirm",
-            axum::routing::post(pages::confirm_outgoing_csv),
+            axum::routing::post(handlers::reconcile::confirm_outgoing_csv),
         )
         .route(
             "/reconcile/{id}/reconciled",
-            axum::routing::post(pages::add_reconciled),
+            axum::routing::post(handlers::reconcile::add_reconciled),
         )
         .route(
             "/reconcile/{id}/reconciled/csv",
-            axum::routing::post(pages::upload_reconciled_csv),
+            axum::routing::post(handlers::reconcile::upload_reconciled_csv),
         )
         .route(
             "/reconcile/{id}/reconciled-csv/confirm",
-            axum::routing::post(pages::confirm_reconciled_csv),
+            axum::routing::post(handlers::reconcile::confirm_reconciled_csv),
         )
         .route(
             "/reconcile/{id}/link",
-            axum::routing::post(pages::link_txns),
+            axum::routing::post(handlers::reconcile::link_txns),
         )
         .route(
             "/reconcile/{id}/unlink",
-            axum::routing::post(pages::unlink_txns),
+            axum::routing::post(handlers::reconcile::unlink_txns),
         )
         .route(
             "/reconcile/{id}/unlink-reconciled",
-            axum::routing::post(pages::unlink_reconciled_txns),
+            axum::routing::post(handlers::reconcile::unlink_reconciled_txns),
         )
         .route(
             "/reconcile/{id}/auto-match",
-            axum::routing::post(pages::auto_match),
+            axum::routing::post(handlers::reconcile::auto_match),
         )
         .route(
             "/reconcile/{id}/ignore-outgoing/{txn_id}",
-            axum::routing::post(pages::ignore_outgoing),
+            axum::routing::post(handlers::reconcile::ignore_outgoing),
         )
         .route(
             "/reconcile/{id}/ignore-reconciled/{txn_id}",
-            axum::routing::post(pages::ignore_reconciled),
+            axum::routing::post(handlers::reconcile::ignore_reconciled),
         )
         .route(
             "/reconcile/{id}/unignore-outgoing/{txn_id}",
-            axum::routing::post(pages::unignore_outgoing),
+            axum::routing::post(handlers::reconcile::unignore_outgoing),
         )
         .route(
             "/reconcile/{id}/unignore-reconciled/{txn_id}",
-            axum::routing::post(pages::unignore_reconciled),
+            axum::routing::post(handlers::reconcile::unignore_reconciled),
         )
         .route(
             "/reconcile/{id}/confirm",
-            axum::routing::post(pages::confirm_proposal),
+            axum::routing::post(handlers::reconcile::confirm_proposal),
         )
         .route(
             "/reconcile/{id}/confirm-all",
-            axum::routing::post(pages::confirm_all_proposals),
+            axum::routing::post(handlers::reconcile::confirm_all_proposals),
         )
         .route(
             "/reconcile/{id}/reject",
-            axum::routing::post(pages::reject_proposal),
+            axum::routing::post(handlers::reconcile::reject_proposal),
         )
         .route(
             "/reconcile/{id}/undo-reject/{outgoing_id}",
-            axum::routing::post(pages::undo_reject),
+            axum::routing::post(handlers::reconcile::undo_reject),
         )
         .nest_service("/static", ServeDir::new(static_dir))
-        .fallback(pages::not_found)
+        .fallback(handlers::hello::not_found)
         .with_state(state)
 }
