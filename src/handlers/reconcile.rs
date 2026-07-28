@@ -297,7 +297,14 @@ async fn render_proposals_page(
                         }
                         button type="submit" class="btn" { "Confirm All" }
                         " "
+                        button type="submit" class="btn" form=(format!("confirm-exact-{}", session_id)) { "Confirm Exact Match" }
+                        " "
                         a href=(format!("/reconcile/{}", session_id)) class="btn btn-ghost" { "Cancel" }
+                    }
+                    form method="post" action=(format!("/reconcile/{}/confirm-exact", session_id)) id=(format!("confirm-exact-{}", session_id)) {
+                        @for sid in skip_ids {
+                            input type="hidden" name="skip_ids" value=(sid) {}
+                        }
                     }
 
                     div class="reconcile-grid" style="margin-top:1rem" {
@@ -435,9 +442,8 @@ pub async fn confirm_proposal(
         for rid in &reconciled_ids {
             reconcile::link_transactions(&state.db().await, oid, *rid).await?;
         }
-        skip_ids.push(oid);
     }
-    // Re-render remaining proposals
+    // Re-render remaining proposals — confirmed match is now marked matched in DB
     render_proposals_page(session_id, state, user, &skip_ids).await
 }
 
@@ -464,7 +470,38 @@ pub async fn confirm_all_proposals(
             reconcile::link_transactions(&state.db().await, p.outgoing_id, *rid).await?;
         }
     }
-    Ok(Redirect::to(&format!("/reconcile/{}", session_id)))
+    Ok(Redirect::to(&format!("/reconcile/{session_id}")))
+}
+
+pub async fn confirm_exact_proposals(
+    Path(session_id): Path<Uuid>,
+    State(state): State<AppState>,
+    user: LoggedInUser,
+    body: axum::body::Bytes,
+) -> Result<maud::Markup, AppError> {
+    reconcile::get_session(&state.db().await, session_id, user.0).await?;
+    let body_str = String::from_utf8_lossy(&body);
+    let mut skip_ids: Vec<Uuid> = Vec::new();
+    for pair in body_str.split('&') {
+        if let Some((key, val)) = pair.split_once('=')
+            && key == "skip_ids"
+            && let Ok(id) = val.parse()
+        {
+            skip_ids.push(id);
+        }
+    }
+    // Get proposals and confirm only exact matches (single reconciled_id)
+    let proposals = reconcile::auto_match(&state.db().await, session_id, &skip_ids).await?;
+    for p in &proposals {
+        if p.reconciled_ids.len() == 1 {
+            for rid in &p.reconciled_ids {
+                reconcile::link_transactions(&state.db().await, p.outgoing_id, *rid).await?;
+            }
+        }
+    }
+    // Re-render proposals page — exact matches are now marked matched in DB
+    // so auto_match will skip them. Pass only the original skip_ids (rejected).
+    render_proposals_page(session_id, state, user, &skip_ids).await
 }
 
 pub async fn reject_proposal(

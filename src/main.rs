@@ -408,6 +408,10 @@ fn app(state: AppState, static_dir: String) -> Router {
             axum::routing::post(handlers::reconcile::confirm_all_proposals),
         )
         .route(
+            "/reconcile/{id}/confirm-exact",
+            axum::routing::post(handlers::reconcile::confirm_exact_proposals),
+        )
+        .route(
             "/reconcile/{id}/reject",
             axum::routing::post(handlers::reconcile::reject_proposal),
         )
