@@ -9,7 +9,7 @@ use crate::requests::{
 };
 use crate::utils;
 use axum::extract::{Form, Multipart, Path, State};
-use axum::response::{IntoResponse, Redirect};
+use axum::response::Redirect;
 use chrono::NaiveDate;
 use uuid::Uuid;
 
@@ -102,7 +102,7 @@ pub async fn link_txns(
     State(state): State<AppState>,
     user: LoggedInUser,
     body: axum::body::Bytes,
-) -> Result<impl IntoResponse, AppError> {
+) -> Result<maud::Markup, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let body_str = String::from_utf8_lossy(&body);
     let mut outgoing_id: Option<Uuid> = None;
@@ -128,30 +128,34 @@ pub async fn link_txns(
     let outgoing_id = match outgoing_id {
         Some(id) => id,
         None => {
-            return Ok(render_sections(
+            return render_sections(
                 session_id,
                 reconcile::SortOrder::default(),
                 &state.db().await,
                 Some("No outgoing transaction selected. Please click a Match button first."),
             )
-            .await
-            .into_response());
+            .await;
         }
     };
     if reconciled_ids.is_empty() {
-        return Ok(render_sections(
+        return render_sections(
             session_id,
             reconcile::SortOrder::default(),
             &state.db().await,
             Some("Please select at least one reconciled transaction to match."),
         )
-        .await
-        .into_response());
+        .await;
     }
     for reconciled_id in reconciled_ids {
         reconcile::link_transactions(&state.db().await, outgoing_id, reconciled_id).await?;
     }
-    Ok(Redirect::to(&format!("/reconcile/{session_id}")).into_response())
+    render_sections(
+        session_id,
+        reconcile::SortOrder::default(),
+        &state.db().await,
+        None,
+    )
+    .await
 }
 
 pub async fn unlink_txns(
@@ -159,12 +163,18 @@ pub async fn unlink_txns(
     State(state): State<AppState>,
     user: LoggedInUser,
     Form(form): Form<UnlinkForm>,
-) -> Result<Redirect, AppError> {
+) -> Result<maud::Markup, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let outgoing_id = Uuid::parse_str(&form.outgoing_id)
         .map_err(|_| AppError::BadRequest("Invalid outgoing ID".into()))?;
     reconcile::unlink_all_for_outgoing(&state.db().await, outgoing_id).await?;
-    Ok(Redirect::to(&format!("/reconcile/{session_id}")))
+    render_sections(
+        session_id,
+        reconcile::SortOrder::default(),
+        &state.db().await,
+        None,
+    )
+    .await
 }
 
 pub async fn unlink_reconciled_txns(
@@ -172,12 +182,18 @@ pub async fn unlink_reconciled_txns(
     State(state): State<AppState>,
     user: LoggedInUser,
     Form(form): Form<UnlinkReconciledForm>,
-) -> Result<Redirect, AppError> {
+) -> Result<maud::Markup, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let reconciled_id = Uuid::parse_str(&form.reconciled_id)
         .map_err(|_| AppError::BadRequest("Invalid reconciled ID".into()))?;
     reconcile::unlink_all_for_reconciled(&state.db().await, reconciled_id).await?;
-    Ok(Redirect::to(&format!("/reconcile/{session_id}")))
+    render_sections(
+        session_id,
+        reconcile::SortOrder::default(),
+        &state.db().await,
+        None,
+    )
+    .await
 }
 
 // ── Ignore / Unignore ──
@@ -187,13 +203,16 @@ pub async fn ignore_outgoing(
     State(state): State<AppState>,
     user: LoggedInUser,
     Form(form): Form<SortQuery>,
-) -> Result<Redirect, AppError> {
+) -> Result<maud::Markup, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     reconcile::ignore_outgoing(&state.db().await, txn_id).await?;
-    let sort = form.sort.unwrap_or_default();
-    Ok(Redirect::to(&format!(
-        "/reconcile/{session_id}?sort={sort}"
-    )))
+    render_sections(
+        session_id,
+        form.sort.unwrap_or_default(),
+        &state.db().await,
+        None,
+    )
+    .await
 }
 
 pub async fn ignore_reconciled(
@@ -201,33 +220,48 @@ pub async fn ignore_reconciled(
     State(state): State<AppState>,
     user: LoggedInUser,
     Form(form): Form<SortQuery>,
-) -> Result<Redirect, AppError> {
+) -> Result<maud::Markup, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     reconcile::ignore_reconciled(&state.db().await, txn_id).await?;
-    let sort = form.sort.unwrap_or_default();
-    Ok(Redirect::to(&format!(
-        "/reconcile/{session_id}?sort={sort}"
-    )))
+    render_sections(
+        session_id,
+        form.sort.unwrap_or_default(),
+        &state.db().await,
+        None,
+    )
+    .await
 }
 
 pub async fn unignore_outgoing(
     Path((session_id, txn_id)): Path<(Uuid, Uuid)>,
     State(state): State<AppState>,
     user: LoggedInUser,
-) -> Result<Redirect, AppError> {
+) -> Result<maud::Markup, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     reconcile::unignore_outgoing(&state.db().await, txn_id).await?;
-    Ok(Redirect::to(&format!("/reconcile/{session_id}")))
+    render_sections(
+        session_id,
+        reconcile::SortOrder::default(),
+        &state.db().await,
+        None,
+    )
+    .await
 }
 
 pub async fn unignore_reconciled(
     Path((session_id, txn_id)): Path<(Uuid, Uuid)>,
     State(state): State<AppState>,
     user: LoggedInUser,
-) -> Result<Redirect, AppError> {
+) -> Result<maud::Markup, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     reconcile::unignore_reconciled(&state.db().await, txn_id).await?;
-    Ok(Redirect::to(&format!("/reconcile/{session_id}")))
+    render_sections(
+        session_id,
+        reconcile::SortOrder::default(),
+        &state.db().await,
+        None,
+    )
+    .await
 }
 
 // ── Auto-match ──
