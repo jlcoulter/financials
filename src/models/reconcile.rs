@@ -355,18 +355,27 @@ pub async fn link_transactions(
     outgoing_id: Uuid,
     reconciled_id: Uuid,
 ) -> Result<(), AppError> {
-    let id = Uuid::now_v7();
-    let result = sqlx::query(
-        "INSERT OR IGNORE INTO match_links (match_id, outgoing_id, reconciled_id) VALUES (?, ?, ?)",
+    // Check if this link already exists
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM match_links WHERE outgoing_id = ? AND reconciled_id = ? AND deleted_at IS NULL)",
     )
-    .bind(id.to_string())
     .bind(outgoing_id.to_string())
     .bind(reconciled_id.to_string())
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
 
-    if result.rows_affected() > 0 {
-        // New link created — mark both as matched
+    if !exists {
+        let id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO match_links (match_id, outgoing_id, reconciled_id) VALUES (?, ?, ?)",
+        )
+        .bind(id.to_string())
+        .bind(outgoing_id.to_string())
+        .bind(reconciled_id.to_string())
+        .execute(pool)
+        .await?;
+
+        // Mark both as matched
         sqlx::query("UPDATE outgoing_txns SET matched = TRUE WHERE txn_id = ?")
             .bind(outgoing_id.to_string())
             .execute(pool)
@@ -381,9 +390,9 @@ pub async fn link_transactions(
 }
 
 pub async fn unlink_transaction(pool: &SqlitePool, match_id: Uuid) -> Result<(), AppError> {
-    // Get the pair and delete in one query
+    // Get the pair before deleting
     let row = sqlx::query_as::<_, (String, String)>(
-        "DELETE FROM match_links WHERE match_id = ? RETURNING outgoing_id, reconciled_id",
+        "SELECT outgoing_id, reconciled_id FROM match_links WHERE match_id = ?",
     )
     .bind(match_id.to_string())
     .fetch_optional(pool)
@@ -393,22 +402,38 @@ pub async fn unlink_transaction(pool: &SqlitePool, match_id: Uuid) -> Result<(),
     let outgoing_id = Uuid::parse_str(&row.0)?;
     let reconciled_id = Uuid::parse_str(&row.1)?;
 
-    // Only set matched = FALSE if no other match_links remain for this txn
-    sqlx::query(
-        "UPDATE outgoing_txns SET matched = FALSE WHERE txn_id = ? AND NOT EXISTS (SELECT 1 FROM match_links WHERE outgoing_id = ? AND deleted_at IS NULL)",
+    sqlx::query("DELETE FROM match_links WHERE match_id = ?")
+        .bind(match_id.to_string())
+        .execute(pool)
+        .await?;
+
+    // Check if outgoing still has other matches
+    let outgoing_matched: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM match_links WHERE outgoing_id = ? AND deleted_at IS NULL)",
     )
     .bind(outgoing_id.to_string())
-    .bind(outgoing_id.to_string())
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
 
-    sqlx::query(
-        "UPDATE reconciled_txns SET matched = FALSE WHERE txn_id = ? AND NOT EXISTS (SELECT 1 FROM match_links WHERE reconciled_id = ? AND deleted_at IS NULL)",
+    let reconciled_matched: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM match_links WHERE reconciled_id = ? AND deleted_at IS NULL)",
     )
     .bind(reconciled_id.to_string())
-    .bind(reconciled_id.to_string())
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
+
+    if !outgoing_matched {
+        sqlx::query("UPDATE outgoing_txns SET matched = FALSE WHERE txn_id = ?")
+            .bind(outgoing_id.to_string())
+            .execute(pool)
+            .await?;
+    }
+    if !reconciled_matched {
+        sqlx::query("UPDATE reconciled_txns SET matched = FALSE WHERE txn_id = ?")
+            .bind(reconciled_id.to_string())
+            .execute(pool)
+            .await?;
+    }
 
     Ok(())
 }
@@ -434,45 +459,6 @@ pub async fn list_matches(pool: &SqlitePool, session_id: Uuid) -> Result<Vec<Mat
             })
         })
         .collect()
-}
-
-/// Delete all match_links for an outgoing txn and update matched flags in one transaction.
-pub async fn unlink_all_for_outgoing(pool: &SqlitePool, outgoing_id: Uuid) -> Result<(), AppError> {
-    let mut tx = pool.begin().await?;
-
-    sqlx::query("DELETE FROM match_links WHERE outgoing_id = ?")
-        .bind(outgoing_id.to_string())
-        .execute(&mut *tx)
-        .await?;
-
-    sqlx::query("UPDATE outgoing_txns SET matched = FALSE WHERE txn_id = ?")
-        .bind(outgoing_id.to_string())
-        .execute(&mut *tx)
-        .await?;
-
-    tx.commit().await?;
-    Ok(())
-}
-
-/// Delete all match_links for a reconciled txn and update matched flags in one transaction.
-pub async fn unlink_all_for_reconciled(
-    pool: &SqlitePool,
-    reconciled_id: Uuid,
-) -> Result<(), AppError> {
-    let mut tx = pool.begin().await?;
-
-    sqlx::query("DELETE FROM match_links WHERE reconciled_id = ?")
-        .bind(reconciled_id.to_string())
-        .execute(&mut *tx)
-        .await?;
-
-    sqlx::query("UPDATE reconciled_txns SET matched = FALSE WHERE txn_id = ?")
-        .bind(reconciled_id.to_string())
-        .execute(&mut *tx)
-        .await?;
-
-    tx.commit().await?;
-    Ok(())
 }
 
 pub async fn ignore_outgoing(pool: &SqlitePool, txn_id: Uuid) -> Result<(), AppError> {
