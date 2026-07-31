@@ -643,36 +643,76 @@ pub async fn auto_match(
 
 /// Find a subset of up to `max_len` items whose amounts sum to `target`.
 /// Returns the txn_ids of the matching subset, or None.
+///
+/// Uses a hash-based approach:
+/// - Pre-computes all 2-item sums into a HashMap (O(n²))
+/// - 2-item match: O(1) lookup
+/// - 3-item match: iterate items, check `target - amount` in 2-sum map (O(n))
+/// - 4-item match: iterate 2-sum entries, check `target - sum` in 2-sum map (O(n²))
+///
+/// This avoids the O(2ⁿ) exponential blowup of the recursive subset-sum approach.
 fn find_subset_sum(items: &[&ReconciledTxn], target: i64, max_len: usize) -> Option<Vec<Uuid>> {
-    // Brute force for small max_len
-    for len in 2..=max_len {
-        if len > items.len() {
-            break;
-        }
-        if let Some(combo) = subset_sum_of_size(items, target, len) {
-            return Some(combo);
-        }
-    }
-    None
-}
-
-fn subset_sum_of_size(items: &[&ReconciledTxn], target: i64, size: usize) -> Option<Vec<Uuid>> {
-    if size == 0 {
-        return if target == 0 { Some(vec![]) } else { None };
-    }
-    if items.len() < size {
+    if items.len() < 2 || max_len < 2 {
         return None;
     }
 
-    // Take first item or skip it
-    let first = items[0];
-    // Try including first
-    if let Some(mut combo) = subset_sum_of_size(&items[1..], target - first.amount, size - 1) {
-        combo.push(first.txn_id);
-        return Some(combo);
+    let n = items.len();
+    let max_len = max_len.min(4);
+
+    // Pre-compute all 2-item sums: HashMap<sum, Vec<[txn_id; 2]>>
+    let mut sum2: HashMap<i64, Vec<[Uuid; 2]>> = HashMap::new();
+    for i in 0..n {
+        for j in i + 1..n {
+            let sum = items[i].amount + items[j].amount;
+            sum2.entry(sum)
+                .or_default()
+                .push([items[i].txn_id, items[j].txn_id]);
+        }
     }
-    // Try skipping first
-    subset_sum_of_size(&items[1..], target, size)
+
+    // 2-item match
+    if max_len >= 2
+        && let Some(combos) = sum2.get(&target)
+        && let Some(combo) = combos.first()
+    {
+        return Some(vec![combo[0], combo[1]]);
+    }
+
+    // 3-item match: for each item, check if target - amount is in sum2
+    if max_len >= 3 {
+        for item in items {
+            let remaining = target - item.amount;
+            if let Some(combos) = sum2.get(&remaining) {
+                for combo in combos {
+                    if combo[0] != item.txn_id && combo[1] != item.txn_id {
+                        return Some(vec![item.txn_id, combo[0], combo[1]]);
+                    }
+                }
+            }
+        }
+    }
+
+    // 4-item match: 2+2 approach
+    if max_len >= 4 {
+        for (sum_a, combos_a) in &sum2 {
+            let remaining = target - sum_a;
+            if let Some(combos_b) = sum2.get(&remaining) {
+                for combo_a in combos_a {
+                    for combo_b in combos_b {
+                        if combo_a[0] != combo_b[0]
+                            && combo_a[0] != combo_b[1]
+                            && combo_a[1] != combo_b[0]
+                            && combo_a[1] != combo_b[1]
+                        {
+                            return Some(vec![combo_a[0], combo_a[1], combo_b[0], combo_b[1]]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -750,18 +790,32 @@ mod tests {
         assert_eq!(find_subset_sum(&items, 100, 3), None);
     }
 
-    // ── subset_sum_of_size ──
-
     #[test]
-    fn subset_sum_size_zero_target_zero() {
-        let items: Vec<&ReconciledTxn> = vec![];
-        let result = subset_sum_of_size(&items, 0, 0);
-        assert_eq!(result, Some(vec![]));
+    fn find_subset_sum_four_item_match() {
+        let t1 = txn("00000000-0000-0000-0000-000000000001", 10);
+        let t2 = txn("00000000-0000-0000-0000-000000000002", 20);
+        let t3 = txn("00000000-0000-0000-0000-000000000003", 30);
+        let t4 = txn("00000000-0000-0000-0000-000000000004", 40);
+        let items = [&t1, &t2, &t3, &t4];
+        let result = find_subset_sum(&items, 100, 4);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().len(), 4);
     }
 
     #[test]
-    fn subset_sum_size_zero_target_nonzero() {
-        let items: Vec<&ReconciledTxn> = vec![];
-        assert_eq!(subset_sum_of_size(&items, 100, 0), None);
+    fn find_subset_sum_large_set_performance() {
+        // 200 items — the old O(2^n) algorithm would hang here
+        let items: Vec<ReconciledTxn> = (0..200)
+            .map(|i| {
+                txn(
+                    &format!("00000000-0000-0000-0000-{:012}", i),
+                    (i as i64 % 97) + 1,
+                )
+            })
+            .collect();
+        let refs: Vec<&ReconciledTxn> = items.iter().collect();
+        // Should complete quickly and not find a match (sums don't align)
+        let result = find_subset_sum(&refs, 999999, 4);
+        assert_eq!(result, None);
     }
 }
