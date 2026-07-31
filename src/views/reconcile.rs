@@ -208,7 +208,7 @@ pub async fn reconcile_detail(
                 }
             }
 
-            (render_reconcile_sections(session_id, sort, &unmatched_outgoing, &unmatched_reconciled, unmatched_max, &matched_outgoing, &match_map, &reconciled, &ignored_outgoing, &ignored_reconciled, ignored_max))
+            (render_reconcile_sections(session_id, sort, &unmatched_outgoing, &unmatched_reconciled, unmatched_max, &matched_outgoing, &match_map, &reconciled, &ignored_outgoing, &ignored_reconciled, ignored_max, None))
         },
         Some(&user),
     ))
@@ -227,9 +227,13 @@ pub fn render_reconcile_sections(
     ignored_outgoing: &[OutgoingTxn],
     ignored_reconciled: &[ReconciledTxn],
     ignored_max: usize,
+    error: Option<&str>,
 ) -> maud::Markup {
     maud::html! {
         div id="reconcile-sections" {
+            @if let Some(msg) = error {
+                div class="error" { (msg) }
+            }
             // ════════════════════════════════════════════════════════════════
             // SECTION 1: Un-reconciled
             // ════════════════════════════════════════════════════════════════
