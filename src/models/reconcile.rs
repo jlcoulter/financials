@@ -215,6 +215,7 @@ pub async fn add_outgoing(
 }
 
 /// Bulk insert outgoing transactions, deduplicating against existing (date, amount, vendor).
+/// Uses INSERT OR IGNORE with a unique index to avoid N+1 queries.
 /// Returns the count of new rows inserted.
 pub async fn bulk_add_outgoing(
     pool: &SqlitePool,
@@ -223,27 +224,21 @@ pub async fn bulk_add_outgoing(
 ) -> Result<usize, AppError> {
     let mut count = 0usize;
     for row in txns {
-        // Check for duplicate
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM outgoing_txns WHERE session_id = ? AND date = ? AND amount = ? AND vendor = ? AND deleted_at IS NULL)",
+        let id = Uuid::now_v7();
+        let metadata_json =
+            serde_json::to_string(&row.metadata).unwrap_or_else(|_| "{}".to_string());
+        let result = sqlx::query(
+            "INSERT OR IGNORE INTO outgoing_txns (txn_id, session_id, date, amount, vendor, metadata) VALUES (?, ?, ?, ?, ?, ?)",
         )
+        .bind(id.to_string())
         .bind(session_id.to_string())
         .bind(row.date.to_string())
         .bind(row.amount)
         .bind(&row.vendor)
-        .fetch_one(pool)
+        .bind(&metadata_json)
+        .execute(pool)
         .await?;
-
-        if !exists {
-            add_outgoing(
-                pool,
-                session_id,
-                row.date,
-                row.amount,
-                &row.vendor,
-                &row.metadata,
-            )
-            .await?;
+        if result.rows_affected() > 0 {
             count += 1;
         }
     }
@@ -321,6 +316,7 @@ pub async fn add_reconciled(
 }
 
 /// Bulk insert reconciled transactions, deduplicating against existing (date, amount, vendor).
+/// Uses INSERT OR IGNORE with a unique index to avoid N+1 queries.
 /// Returns the count of new rows inserted.
 pub async fn bulk_add_reconciled(
     pool: &SqlitePool,
@@ -329,26 +325,21 @@ pub async fn bulk_add_reconciled(
 ) -> Result<usize, AppError> {
     let mut count = 0usize;
     for row in txns {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM reconciled_txns WHERE session_id = ? AND date = ? AND amount = ? AND vendor = ? AND deleted_at IS NULL)",
+        let id = Uuid::now_v7();
+        let metadata_json =
+            serde_json::to_string(&row.metadata).unwrap_or_else(|_| "{}".to_string());
+        let result = sqlx::query(
+            "INSERT OR IGNORE INTO reconciled_txns (txn_id, session_id, date, amount, vendor, metadata) VALUES (?, ?, ?, ?, ?, ?)",
         )
+        .bind(id.to_string())
         .bind(session_id.to_string())
         .bind(row.date.to_string())
         .bind(row.amount)
         .bind(&row.vendor)
-        .fetch_one(pool)
+        .bind(&metadata_json)
+        .execute(pool)
         .await?;
-
-        if !exists {
-            add_reconciled(
-                pool,
-                session_id,
-                row.date,
-                row.amount,
-                &row.vendor,
-                &row.metadata,
-            )
-            .await?;
+        if result.rows_affected() > 0 {
             count += 1;
         }
     }
