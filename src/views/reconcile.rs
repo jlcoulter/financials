@@ -103,7 +103,7 @@ pub async fn reconcile_detail(
             form id="reconcile-match-form" method="post" action=(format!("/reconcile/{}/link", session_id))
                 hx-post=(format!("/reconcile/{}/link", session_id))
                 hx-target="#reconcile-sections"
-                hx-swap="morphdom" {}
+                hx-swap="outerHTML" {}
 
             // ── Toolbar ──
             div class="reconcile-toolbar" {
@@ -258,7 +258,7 @@ pub fn render_reconcile_sections(
                                     form method="post" action=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form"
                                         hx-post=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id))
                                         hx-target="#reconcile-sections"
-                                        hx-swap="morphdom" {
+                                        hx-swap="outerHTML" {
                                         input type="hidden" name="sort" value=(sort.to_string()) {}
                                         button type="submit" class="btn-ignore" { "Ignore" }
                                     }
@@ -292,7 +292,7 @@ pub fn render_reconcile_sections(
                                     form method="post" action=(format!("/reconcile/{}/ignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form"
                                         hx-post=(format!("/reconcile/{}/ignore-reconciled/{}", session_id, r.txn_id))
                                         hx-target="#reconcile-sections"
-                                        hx-swap="morphdom" {
+                                        hx-swap="outerHTML" {
                                         input type="hidden" name="sort" value=(sort.to_string()) {}
                                         button type="submit" class="btn-ignore" { "Ignore" }
                                     }
@@ -360,7 +360,7 @@ pub fn render_reconcile_sections(
                                     form method="post" action=(format!("/reconcile/{}/unlink", session_id)) class="txn-unlink-form"
                                         hx-post=(format!("/reconcile/{}/unlink", session_id))
                                         hx-target="#reconcile-sections"
-                                        hx-swap="morphdom" {
+                                        hx-swap="outerHTML" {
                                         input type="hidden" name="outgoing_id" value=(o.txn_id) {}
                                         button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Unmatch" }
                                     }
@@ -391,7 +391,7 @@ pub fn render_reconcile_sections(
                                             form method="post" action=(format!("/reconcile/{}/unlink-reconciled", session_id)) class="txn-unlink-form"
                                                 hx-post=(format!("/reconcile/{}/unlink-reconciled", session_id))
                                                 hx-target="#reconcile-sections"
-                                                hx-swap="morphdom" {
+                                                hx-swap="outerHTML" {
                                                 input type="hidden" name="reconciled_id" value=(r.txn_id) {}
                                                 button type="submit" class="btn-ghost" style="font-size:0.7rem" { "Unmatch" }
                                             }
@@ -440,7 +440,7 @@ pub fn render_reconcile_sections(
                                     form method="post" action=(format!("/reconcile/{}/unignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form"
                                         hx-post=(format!("/reconcile/{}/unignore-outgoing/{}", session_id, o.txn_id))
                                         hx-target="#reconcile-sections"
-                                        hx-swap="morphdom" {
+                                        hx-swap="outerHTML" {
                                         button type="submit" class="btn-undo" { "Undo" }
                                     }
                                 }
@@ -472,7 +472,7 @@ pub fn render_reconcile_sections(
                                     form method="post" action=(format!("/reconcile/{}/unignore-reconciled/{}", session_id, r.txn_id)) class="txn-ignore-form"
                                         hx-post=(format!("/reconcile/{}/unignore-reconciled/{}", session_id, r.txn_id))
                                         hx-target="#reconcile-sections"
-                                        hx-swap="morphdom" {
+                                        hx-swap="outerHTML" {
                                         button type="submit" class="btn-undo" { "Undo" }
                                     }
                                 }
