@@ -99,12 +99,14 @@ pub async fn get_session(
 
 pub async fn delete_session(pool: &SqlitePool, session_id: Uuid) -> Result<(), AppError> {
     let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    // Soft-delete match links first (cascade won't fire on soft-delete)
-    sqlx::query("DELETE FROM match_links WHERE outgoing_id IN (SELECT txn_id FROM outgoing_txns WHERE session_id = ?)")
+    // Soft-delete match links (consistent with other tables)
+    sqlx::query("UPDATE match_links SET deleted_at = ? WHERE outgoing_id IN (SELECT txn_id FROM outgoing_txns WHERE session_id = ?)")
+        .bind(&now)
         .bind(session_id.to_string())
         .execute(pool)
         .await?;
-    sqlx::query("DELETE FROM match_links WHERE reconciled_id IN (SELECT txn_id FROM reconciled_txns WHERE session_id = ?)")
+    sqlx::query("UPDATE match_links SET deleted_at = ? WHERE reconciled_id IN (SELECT txn_id FROM reconciled_txns WHERE session_id = ?)")
+        .bind(&now)
         .bind(session_id.to_string())
         .execute(pool)
         .await?;
@@ -355,7 +357,7 @@ pub async fn link_transactions(
 ) -> Result<(), AppError> {
     // Check if this link already exists
     let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM match_links WHERE outgoing_id = ? AND reconciled_id = ?)",
+        "SELECT EXISTS(SELECT 1 FROM match_links WHERE outgoing_id = ? AND reconciled_id = ? AND deleted_at IS NULL)",
     )
     .bind(outgoing_id.to_string())
     .bind(reconciled_id.to_string())
@@ -406,17 +408,19 @@ pub async fn unlink_transaction(pool: &SqlitePool, match_id: Uuid) -> Result<(),
         .await?;
 
     // Check if outgoing still has other matches
-    let outgoing_matched: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM match_links WHERE outgoing_id = ?)")
-            .bind(outgoing_id.to_string())
-            .fetch_one(pool)
-            .await?;
+    let outgoing_matched: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM match_links WHERE outgoing_id = ? AND deleted_at IS NULL)",
+    )
+    .bind(outgoing_id.to_string())
+    .fetch_one(pool)
+    .await?;
 
-    let reconciled_matched: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM match_links WHERE reconciled_id = ?)")
-            .bind(reconciled_id.to_string())
-            .fetch_one(pool)
-            .await?;
+    let reconciled_matched: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM match_links WHERE reconciled_id = ? AND deleted_at IS NULL)",
+    )
+    .bind(reconciled_id.to_string())
+    .fetch_one(pool)
+    .await?;
 
     if !outgoing_matched {
         sqlx::query("UPDATE outgoing_txns SET matched = FALSE WHERE txn_id = ?")
@@ -440,7 +444,7 @@ pub async fn list_matches(pool: &SqlitePool, session_id: Uuid) -> Result<Vec<Mat
          FROM match_links m \
          JOIN outgoing_txns o ON m.outgoing_id = o.txn_id \
          JOIN reconciled_txns r ON m.reconciled_id = r.txn_id \
-         WHERE o.session_id = ? AND o.deleted_at IS NULL AND r.deleted_at IS NULL",
+         WHERE o.session_id = ? AND o.deleted_at IS NULL AND r.deleted_at IS NULL AND m.deleted_at IS NULL",
     )
     .bind(session_id.to_string())
     .fetch_all(pool)
