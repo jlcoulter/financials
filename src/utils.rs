@@ -15,12 +15,11 @@ pub fn parse_dollars(s: &str) -> Result<i64, String> {
     } else {
         s.starts_with('-')
     };
-    // Strip leading signs, currency symbols, and parentheses
+    // Strip currency symbols, whitespace, leading signs, and parentheses
     let cleaned: String = s
         .chars()
         .filter(|c| {
             !c.is_whitespace()
-                && *c != ','
                 && *c != '$'
                 && *c != '€'
                 && *c != '£'
@@ -29,7 +28,45 @@ pub fn parse_dollars(s: &str) -> Result<i64, String> {
                 && *c != '-'
         })
         .collect();
-    let val: f64 = cleaned
+
+    // Detect format based on grouping/decimal separators.
+    // If both '.' and ',' are present, the last one is the decimal separator.
+    // This handles both US format ($1,234.56) and European format (€1.234,56).
+    let last_dot = cleaned.rfind('.');
+    let last_comma = cleaned.rfind(',');
+
+    let normalized = match (last_dot, last_comma) {
+        // Both present — the last one is the decimal separator
+        (Some(dot_pos), Some(comma_pos)) => {
+            if comma_pos > dot_pos {
+                // European: comma is decimal, dot is thousands
+                // Remove all dots, then replace the remaining comma with a dot
+                let without_dots: String = cleaned.chars().filter(|c| *c != '.').collect();
+                without_dots.replacen(',', ".", 1)
+            } else {
+                // US: dot is decimal, comma is thousands
+                cleaned.chars().filter(|c| *c != ',').collect()
+            }
+        }
+        // Only comma present — could be decimal (European) or thousands (US).
+        // If the comma is followed by exactly 2 digits at the end, it's a decimal separator.
+        (None, Some(comma_pos)) => {
+            let after_comma = &cleaned[comma_pos + 1..];
+            if after_comma.len() == 2 && after_comma.chars().all(|c| c.is_ascii_digit()) {
+                // European: comma is decimal — replace with dot
+                cleaned.replacen(',', ".", 1)
+            } else {
+                // US: comma is thousands separator — strip it
+                cleaned.chars().filter(|c| *c != ',').collect()
+            }
+        }
+        // Only dot present — keep as-is (decimal separator)
+        (Some(_), None) => cleaned,
+        // Neither — plain number
+        (None, None) => cleaned,
+    };
+
+    let val: f64 = normalized
         .parse()
         .map_err(|_| format!("Invalid amount: {}", s))?;
     let cents = (val * 100.0).round() as i64;
@@ -100,9 +137,29 @@ mod tests {
 
     #[test]
     fn parse_dollars_euro() {
-        // Euro format is not specially handled; after stripping € and ,
-        // "€1.234,56" becomes "1.23456" which is ~123 cents
-        assert_eq!(parse_dollars("€1.234,56").unwrap(), 123);
+        // European format: comma is decimal, dot is thousands
+        assert_eq!(parse_dollars("€1.234,56").unwrap(), 123456);
+    }
+
+    #[test]
+    fn parse_dollars_euro_no_thousands() {
+        assert_eq!(parse_dollars("€0,99").unwrap(), 99);
+        assert_eq!(parse_dollars("€99,00").unwrap(), 9900);
+    }
+
+    #[test]
+    fn parse_dollars_euro_negative() {
+        assert_eq!(parse_dollars("-€1.234,56").unwrap(), -123456);
+    }
+
+    #[test]
+    fn parse_dollars_euro_large() {
+        assert_eq!(parse_dollars("€1.000.000,00").unwrap(), 100000000);
+    }
+
+    #[test]
+    fn parse_dollars_euro_pound() {
+        assert_eq!(parse_dollars("£1.234,56").unwrap(), 123456);
     }
 
     #[test]
