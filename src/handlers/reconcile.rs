@@ -125,12 +125,26 @@ pub async fn link_txns(
             }
         }
     }
-    let outgoing_id =
-        outgoing_id.ok_or_else(|| AppError::BadRequest("No outgoing selected".into()))?;
+    let outgoing_id = match outgoing_id {
+        Some(id) => id,
+        None => {
+            return render_sections(
+                session_id,
+                reconcile::SortOrder::default(),
+                &state.db().await,
+                Some("No outgoing transaction selected. Please click a Match button first."),
+            )
+            .await;
+        }
+    };
     if reconciled_ids.is_empty() {
-        return Err(AppError::BadRequest(
-            "No reconciled transaction selected".into(),
-        ));
+        return render_sections(
+            session_id,
+            reconcile::SortOrder::default(),
+            &state.db().await,
+            Some("Please select at least one reconciled transaction to match."),
+        )
+        .await;
     }
     for reconciled_id in reconciled_ids {
         reconcile::link_transactions(&state.db().await, outgoing_id, reconciled_id).await?;
@@ -139,6 +153,7 @@ pub async fn link_txns(
         session_id,
         reconcile::SortOrder::default(),
         &state.db().await,
+        None,
     )
     .await
 }
@@ -161,6 +176,7 @@ pub async fn unlink_txns(
         session_id,
         reconcile::SortOrder::default(),
         &state.db().await,
+        None,
     )
     .await
 }
@@ -182,6 +198,7 @@ pub async fn unlink_reconciled_txns(
         session_id,
         reconcile::SortOrder::default(),
         &state.db().await,
+        None,
     )
     .await
 }
@@ -196,7 +213,13 @@ pub async fn ignore_outgoing(
 ) -> Result<maud::Markup, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     reconcile::ignore_outgoing(&state.db().await, txn_id).await?;
-    render_sections(session_id, form.sort.unwrap_or_default(), &state.db().await).await
+    render_sections(
+        session_id,
+        form.sort.unwrap_or_default(),
+        &state.db().await,
+        None,
+    )
+    .await
 }
 
 pub async fn ignore_reconciled(
@@ -207,7 +230,13 @@ pub async fn ignore_reconciled(
 ) -> Result<maud::Markup, AppError> {
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     reconcile::ignore_reconciled(&state.db().await, txn_id).await?;
-    render_sections(session_id, form.sort.unwrap_or_default(), &state.db().await).await
+    render_sections(
+        session_id,
+        form.sort.unwrap_or_default(),
+        &state.db().await,
+        None,
+    )
+    .await
 }
 
 pub async fn unignore_outgoing(
@@ -221,6 +250,7 @@ pub async fn unignore_outgoing(
         session_id,
         reconcile::SortOrder::default(),
         &state.db().await,
+        None,
     )
     .await
 }
@@ -236,6 +266,7 @@ pub async fn unignore_reconciled(
         session_id,
         reconcile::SortOrder::default(),
         &state.db().await,
+        None,
     )
     .await
 }
@@ -836,6 +867,7 @@ async fn render_sections(
     session_id: Uuid,
     sort: reconcile::SortOrder,
     pool: &sqlx::SqlitePool,
+    error: Option<&str>,
 ) -> Result<maud::Markup, AppError> {
     let outgoing = reconcile::list_outgoing(pool, session_id, sort).await?;
     let reconciled = reconcile::list_reconciled(pool, session_id, sort).await?;
@@ -871,6 +903,7 @@ async fn render_sections(
         &ignored_outgoing,
         &ignored_reconciled,
         ignored_max,
+        error,
     ))
 }
 
