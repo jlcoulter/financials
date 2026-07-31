@@ -214,20 +214,26 @@ pub async fn rename_date(
     old_date: NaiveDate,
     new_date: NaiveDate,
 ) -> Result<usize, AppError> {
+    let mut tx = pool.begin().await?;
+
     let result = sqlx::query(
         "UPDATE balance_logs SET log_date = ? \
-         WHERE log_date = ? AND item_id IN (\
-           SELECT item_id FROM wealth_items WHERE portfolio_id = ? AND deleted_at IS NULL\
+         WHERE log_date = ? AND item_id IN ( \
+           SELECT item_id FROM wealth_items WHERE portfolio_id = ? AND deleted_at IS NULL \
          ) AND deleted_at IS NULL",
     )
     .bind(new_date.to_string())
     .bind(old_date.to_string())
     .bind(portfolio_id.to_string())
-    .execute(pool)
+    .execute(&mut *tx)
     .await;
 
     match result {
-        Ok(r) => Ok(r.rows_affected() as usize),
+        Ok(r) => {
+            let rows = r.rows_affected() as usize;
+            tx.commit().await?;
+            Ok(rows)
+        }
         Err(sqlx::Error::Database(ref db_err))
             if crate::error::is_unique_constraint(db_err.as_ref()) =>
         {
@@ -236,7 +242,10 @@ pub async fn rename_date(
                 new_date
             )))
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            let _ = tx.rollback().await;
+            Err(e.into())
+        }
     }
 }
 
