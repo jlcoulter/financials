@@ -167,11 +167,7 @@ pub async fn unlink_txns(
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let outgoing_id = Uuid::parse_str(&form.outgoing_id)
         .map_err(|_| AppError::BadRequest("Invalid outgoing ID".into()))?;
-    // Find and remove all match_links for this outgoing
-    let matches = reconcile::list_matches(&state.db().await, session_id).await?;
-    for m in matches.iter().filter(|m| m.outgoing_id == outgoing_id) {
-        reconcile::unlink_transaction(&state.db().await, m.match_id).await?;
-    }
+    reconcile::unlink_all_for_outgoing(&state.db().await, outgoing_id).await?;
     render_sections(
         session_id,
         reconcile::SortOrder::default(),
@@ -190,10 +186,7 @@ pub async fn unlink_reconciled_txns(
     reconcile::get_session(&state.db().await, session_id, user.0).await?;
     let reconciled_id = Uuid::parse_str(&form.reconciled_id)
         .map_err(|_| AppError::BadRequest("Invalid reconciled ID".into()))?;
-    let matches = reconcile::list_matches(&state.db().await, session_id).await?;
-    for m in matches.iter().filter(|m| m.reconciled_id == reconciled_id) {
-        reconcile::unlink_transaction(&state.db().await, m.match_id).await?;
-    }
+    reconcile::unlink_all_for_reconciled(&state.db().await, reconciled_id).await?;
     render_sections(
         session_id,
         reconcile::SortOrder::default(),
