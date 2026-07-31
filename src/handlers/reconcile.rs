@@ -877,21 +877,27 @@ async fn render_sections(
 // ── URL decode helper ──
 
 fn urldecode(s: &str) -> String {
-    let mut result = String::new();
+    let mut bytes: Vec<u8> = Vec::new();
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
         if c == '%' {
             let hex: String = chars.by_ref().take(2).collect();
             if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                result.push(byte as char);
+                bytes.push(byte);
             }
         } else if c == '+' {
-            result.push(' ');
+            bytes.push(b' ');
         } else {
-            result.push(c);
+            // Encode the character as UTF-8 bytes
+            let mut buf = [0u8; 4];
+            c.encode_utf8(&mut buf);
+            bytes.extend_from_slice(&buf[..c.len_utf8()]);
         }
     }
-    result
+    String::from_utf8(bytes).unwrap_or_else(|e| {
+        // Should not happen with valid input, but fall back gracefully
+        String::from_utf8_lossy(e.as_bytes()).into_owned()
+    })
 }
 
 #[cfg(test)]
@@ -920,9 +926,8 @@ mod tests {
 
     #[test]
     fn urldecode_multi_byte() {
-        // The urldecode function handles one byte at a time, so multi-byte
-        // UTF-8 chars produce multiple decoded chars. %C3%A9 → two chars (Ã©)
+        // %C3%A9 is the UTF-8 encoding of é (U+00E9)
         let result = urldecode("%C3%A9");
-        assert!(result.contains("Ã"));
+        assert_eq!(result, "é");
     }
 }
