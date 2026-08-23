@@ -1,0 +1,17 @@
+/target
+AGENTS.md
+*.db
+*.db-shm
+.db-wal
+.env.
+.env
+*.swp
+*.swo
+*~
+.direnv/
+.vscode/
+.idea
+litestream.yml
+data.db-wal
+data.db-litestream/
+.data.db-litestream/
