@@ -143,7 +143,7 @@ pub async fn reconcile_detail(
                         div class="dropzone" id=(format!("dz-outgoing-{}", session_id))
                             ondragover=(format!("event.preventDefault(); document.getElementById('dz-outgoing-{}').classList.add('dropzone--dragover')", session_id))
                             ondragleave=(format!("document.getElementById('dz-outgoing-{}').classList.remove('dropzone--dragover')", session_id))
-                            ondrop=(format!("event.preventDefault(); document.getElementById('dz-outgoing-{}').classList.remove('dropzone--dragover'); var f=event.dataTransfer.files[0]; if(f){{document.getElementById('file-outgoing-{}').files=f; document.getElementById('file-outgoing-{}').closest('form').requestSubmit()}}", session_id, session_id, session_id))
+                            ondrop=(format!("event.preventDefault(); document.getElementById('dz-outgoing-{}').classList.remove('dropzone--dragover'); var dt=new DataTransfer(); dt.items.add(event.dataTransfer.files[0]); if(dt.files.length){{document.getElementById('file-outgoing-{}').files=dt.files; document.getElementById('file-outgoing-{}').closest('form').requestSubmit()}}", session_id, session_id, session_id))
                             onclick=(format!("document.getElementById('file-outgoing-{}').click()", session_id)) {
                             div class="dropzone-label" { "Outgoing CSV" }
                             div class="dropzone-hint" { "Drop file here or click to browse" }
@@ -151,7 +151,7 @@ pub async fn reconcile_detail(
                         div class="dropzone" id=(format!("dz-reconciled-{}", session_id))
                             ondragover=(format!("event.preventDefault(); document.getElementById('dz-reconciled-{}').classList.add('dropzone--dragover')", session_id))
                             ondragleave=(format!("document.getElementById('dz-reconciled-{}').classList.remove('dropzone--dragover')", session_id))
-                            ondrop=(format!("event.preventDefault(); document.getElementById('dz-reconciled-{}').classList.remove('dropzone--dragover'); var f=event.dataTransfer.files[0]; if(f){{document.getElementById('file-reconciled-{}').files=f; document.getElementById('file-reconciled-{}').closest('form').requestSubmit()}}", session_id, session_id, session_id))
+                            ondrop=(format!("event.preventDefault(); document.getElementById('dz-reconciled-{}').classList.remove('dropzone--dragover'); var dt=new DataTransfer(); dt.items.add(event.dataTransfer.files[0]); if(dt.files.length){{document.getElementById('file-reconciled-{}').files=dt.files; document.getElementById('file-reconciled-{}').closest('form').requestSubmit()}}", session_id, session_id, session_id))
                             onclick=(format!("document.getElementById('file-reconciled-{}').click()", session_id)) {
                             div class="dropzone-label" { "Reconciled CSV" }
                             div class="dropzone-hint" { "Drop file here or click to browse" }
