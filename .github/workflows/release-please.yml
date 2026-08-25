@@ -17,3 +17,4 @@ jobs:
         with:
           release-type: rust
           target-branch: master
+          token: ${{ secrets.RELEASE_PLEASE_PAT }}
