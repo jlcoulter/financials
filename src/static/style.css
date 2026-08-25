@@ -804,7 +804,7 @@ th.th--debt {
     color: var(--muted);
 }
 
-.reconcile-overs {
+.reconcile-unaccounted {
     color: #ef4444;
     font-weight: 600;
 }

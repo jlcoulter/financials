@@ -199,12 +199,12 @@ pub async fn reconcile_detail(
             // ── Summary: total unmatched amounts ──
             @let unmatched_outgoing_total: i64 = unmatched_outgoing.iter().map(|o| o.amount).sum();
             @let unmatched_reconciled_total: i64 = unmatched_reconciled.iter().map(|r| r.amount).sum();
-            @let overs = unmatched_outgoing_total - unmatched_reconciled_total;
+            @let unaccounted = unmatched_outgoing_total - unmatched_reconciled_total;
             div class="reconcile-summary" {
                 span { "Unmatched Outgoing: " (utils::format_cents(unmatched_outgoing_total)) }
                 span { "Unmatched Reconciled: " (utils::format_cents(unmatched_reconciled_total)) }
-                @if overs != 0 {
-                    span class="reconcile-overs" { "Overs: " (utils::format_cents(overs)) }
+                @if unaccounted != 0 {
+                    span class="reconcile-unaccounted" { "Unaccounted: " (utils::format_cents(unaccounted)) }
                 }
             }
 
