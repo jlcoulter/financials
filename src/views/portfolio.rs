@@ -105,7 +105,7 @@ pub async fn portfolio(
                                         "cash" => "th--cash",
                                         _ => "th--asset",
                                     };
-                                    th id=(format!("th-{}", item.item_id)) class=(format!("{}", type_class)) {
+                                    th id=(format!("th-{}", item.item_id)) class=(type_class) {
                                         (item.name)
                                         span class="col-arrows" {
                                             @if idx > 0 {
