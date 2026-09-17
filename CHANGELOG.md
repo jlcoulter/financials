@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/jlcoulter/financials/compare/v0.1.1...v0.2.0) (2026-09-17)
+
+
+### Features
+
+* add match anyway popup  ([#136](https://github.com/jlcoulter/financials/issues/136)) ([6ccee2c](https://github.com/jlcoulter/financials/commit/6ccee2caeca9e1d8711826e26ed3bc7551a662b2))
+
 ## [0.1.1](https://github.com/jlcoulter/financials/compare/v0.1.0...v0.1.1) (2026-08-25)
 
 
