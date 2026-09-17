@@ -250,7 +250,7 @@ pub fn render_reconcile_sections(
                                         span class="txn-vendor" { (o.vendor) }
                                     }
                                     span class="txn-amount" { (utils::format_cents(o.amount)) }
-                                    button type="submit" name="outgoing_id" value=(o.txn_id) form="reconcile-match-form" class="btn btn-sm" { "Match" }
+                                    button type="submit" name="outgoing_id" value=(o.txn_id) data-amount=(o.amount) form="reconcile-match-form" class="btn btn-sm" { "Match" }
                                     form method="post" action=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id)) class="txn-ignore-form"
                                         hx-post=(format!("/reconcile/{}/ignore-outgoing/{}", session_id, o.txn_id))
                                         hx-target="#reconcile-sections"
@@ -279,7 +279,7 @@ pub fn render_reconcile_sections(
                         @if let Some(r) = unmatched_reconciled.get(i) {
                             div class="reconcile-txn reconcile-txn--unmatched" id=(format!("unmatched-rec-{}", i)) {
                                 div class="txn-row" {
-                                    input type="checkbox" name="reconciled_ids" value=(r.txn_id) form="reconcile-match-form" class="txn-card-checkbox" {}
+                                    input type="checkbox" name="reconciled_ids" value=(r.txn_id) data-amount=(r.amount) form="reconcile-match-form" class="txn-card-checkbox" {}
                                     span class="txn-date" { (utils::format_date(r.date)) }
                                     @if !r.vendor.is_empty() {
                                         span class="txn-vendor" { (r.vendor) }
@@ -493,5 +493,80 @@ pub fn render_reconcile_sections(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+    use std::collections::HashMap;
+
+    fn outgoing(id: &str, amount: i64) -> OutgoingTxn {
+        OutgoingTxn {
+            txn_id: Uuid::parse_str(id).unwrap(),
+            session_id: Uuid::nil(),
+            date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+            amount,
+            vendor: "out".to_string(),
+            matched: false,
+            ignored: false,
+            metadata: HashMap::new(),
+        }
+    }
+
+    fn reconciled(id: &str, amount: i64) -> ReconciledTxn {
+        ReconciledTxn {
+            txn_id: Uuid::parse_str(id).unwrap(),
+            session_id: Uuid::nil(),
+            date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+            amount,
+            vendor: "rec".to_string(),
+            matched: false,
+            ignored: false,
+            metadata: HashMap::new(),
+        }
+    }
+
+    fn render(outgoings: &[OutgoingTxn], reconciled: &[ReconciledTxn]) -> String {
+        let unmatched_outgoing: Vec<&OutgoingTxn> =
+            outgoings.iter().filter(|o| !o.matched).collect();
+        let unmatched_reconciled: Vec<&ReconciledTxn> =
+            reconciled.iter().filter(|r| !r.matched).collect();
+        let unmatched_max = unmatched_outgoing.len().max(unmatched_reconciled.len());
+        render_reconcile_sections(
+            Uuid::nil(),
+            crate::models::reconcile::SortOrder::default(),
+            &unmatched_outgoing,
+            &unmatched_reconciled,
+            unmatched_max,
+            &[],
+            &HashMap::new(),
+            reconciled,
+            &[],
+            &[],
+            0,
+        )
+        .into_string()
+    }
+
+    #[test]
+    fn match_button_has_data_amount_attribute() {
+        let out = outgoing("00000000-0000-0000-0000-000000000001", 1099);
+        let html = render(&[out], &[]);
+        assert!(
+            html.contains("data-amount=\"1099\""),
+            "match button should expose outgoing amount as data-amount"
+        );
+    }
+
+    #[test]
+    fn reconciled_checkbox_has_data_amount_attribute() {
+        let rec = reconciled("00000000-0000-0000-0000-000000000001", 1299);
+        let html = render(&[], &[rec]);
+        assert!(
+            html.contains("data-amount=\"1299\""),
+            "reconciled checkbox should expose amount as data-amount"
+        );
     }
 }
